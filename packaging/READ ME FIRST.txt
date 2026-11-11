@@ -1,0 +1,41 @@
+360 Video Shrinker 1.1 - install
+================================
+
+Shrinks big 360-degree videos (walk-through surveys) into small 360 slideshows (.mp4) or folders of
+360 JPEG panoramas: one sharp panorama every few seconds, typically 1/60 to 1/170 of the original size.
+
+Needs: Windows 10 or 11, 64-bit. Nothing else: Python and its video libraries are included. No admin
+rights needed; it installs for you only.
+
+INSTALL
+1. Save the zip file, right-click it > Properties > tick "Unblock" (if shown) > OK.
+2. Right-click the zip > Extract All... (any folder, e.g. Downloads).
+3. Open the extracted folder and double-click Install.cmd. A black window shows the progress and says
+   "Done". Press a key to close it. (If Windows shows "Windows protected your PC", click
+   More info > Run anyway: Install.cmd is a plain text script you can open in Notepad to check.)
+4. Delete the extracted folder and the zip if you like; the program was copied to
+   %LOCALAPPDATA%\Programs\360 Video Shrinker (about 160 MB).
+
+WHAT IT ADDS
+- Start menu and Desktop shortcut "360 Video Shrinker".
+- File Explorer right-click menu: right-click 360 videos > Show more options > 360 Video Shrinker > a
+  preset. On a folder: Find 360 videos in this folder...
+- Your presets and conversion log go in %LOCALAPPDATA%\360 Video Shrinker.
+
+USE
+Open the program, add videos (or a folder), pick a preset (Standard is a good start), press Start.
+The slideshow is saved next to the original video. Originals are never changed or deleted unless you
+ask (and then they go to the Recycle Bin). Watch the slideshows in VLC (free, videolan.org): drag to
+look around, Shift+N / Shift+P for the next / previous panorama. Tools > Read me in the program window
+has the details.
+
+UNINSTALL
+Settings > Apps > Installed apps > 360 Video Shrinker > Uninstall, or run Uninstall.cmd in
+%LOCALAPPDATA%\Programs\360 Video Shrinker. It removes the right-click menu, the shortcuts and the
+program, and asks whether to delete your presets and log too.
+
+INSTALLING A NEWER VERSION
+Close the program and run the new Install.cmd: it replaces the program and keeps your presets and log.
+
+Included software: Python 3.14 (PSF licence), numpy (BSD), Pillow (MIT-CMU), PyAV 19.0.2 with
+FFmpeg (BSD / LGPL / GPL, with x264 and x265). Licence files are in the program's python folder.

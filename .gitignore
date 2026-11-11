@@ -1,0 +1,56 @@
+# a source checkout's own settings and build output
+install.json
+install-record.json
+dist/
+build/
+__pycache__/
+*.pyc
+*.lnk
+
+# data that can end up beside the program
+presets.json
+settings.json
+*.jsonl
+*.log
+selftest/
+queue/
+work/
+log/
+
+# videos, photos and archives
+*.mp4
+*.mov
+*.m4v
+*.mkv
+*.webm
+*.avi
+*.insv
+*.insp
+*.360
+*.lrv
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.heif
+*.webp
+*.dng
+*.tif
+*.tiff
+*.zip
+*.7z
+
+# editors and tools
+.env
+.vscode/
+.idea/
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+*.code-workspace
+*.bak
+*.orig
+*.tmp
+*~
+Thumbs.db
+desktop.ini
