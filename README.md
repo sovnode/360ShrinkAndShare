@@ -6,7 +6,11 @@ seconds** and writes either
 
 - a **360 slideshow** (`.mp4`): each panorama shown 1.5 s, every one a keyframe and a chapter named by
   its time in the original, tagged as 360 so VLC opens it in its look-around view; or
-- a **folder of 360 JPEG panoramas**, each tagged as a 360 photo (GPano).
+- a **folder of 360 JPEG panoramas**, each tagged as a 360 photo (GPano); or
+- a **chaptered video** (new in 1.2): the whole video stays playable, at 12 frames a second with its
+  sound, and the sharpest frame of every 2 s (any frame, not only the original's keyframes) is stored at
+  full quality as a keyframe with a chapter on it. Play it as a video, or pause and press Shift+N /
+  Shift+P to jump from sharp frame to sharp frame. About 1/24 of an 8K export.
 
 Works with equirectangular 360 videos up to 8K (7680 x 3840), 8- and 10-bit, H.264 or HEVC, mono or
 stereo. Typical result: **1/20 to 1/600 of the original's size** (1/60 to 1/170 with the Standard
@@ -48,6 +52,8 @@ python selftest.py               checks everything on synthetic clips (a few min
 - **Shift+N / Shift+P**: next / previous panorama (they are chapters). **Playback > Chapter** lists them
   by their time in the original video.
 - **E** (next frame) also steps one panorama at a time.
+- Chaptered videos: play normally, or pause and use **Shift+N / Shift+P**: each chapter is the sharpest
+  frame of its 2 s, at the original's quality. The frames between are softer (they are only for playing).
 
 ## Presets
 
@@ -59,10 +65,16 @@ python selftest.py               checks everything on synthetic clips (a few min
 | Small - 10 s, 2880 px | 1 / 10 s at 2880 px, HEVC crf 32, skips repeats | 1/330 | 1/668 |
 | Any player - 5 s, 4K, H.264 | like Compact but H.264, for PCs without HEVC | 1/62 | 1/107 |
 | Photos - 5 s, 4K JPEG | folder of 3840 px JPEG panoramas, quality 88 | 1/37 | 1/46 |
+| Chapters - 2 s, whole video 12 fps | the whole video at 12 fps with sound, a full-quality chapter frame every 2 s | 1/24 of an 8K video | |
 
 Edit them in the window (**Edit presets...**): interval, width, sharpest or nearest frame, codec (HEVC,
 H.264, AV1), quality, GPU, timing (1.5 s per panorama or the original's clock, with sound), skipping
 repeats while the camera stands still, and which presets appear in the right-click menu.
+
+A chaptered video has two quality settings of its own: **Chapter frames qp** (26: as sharp as the
+original) and **Frames between qp** (38: small; 34 makes the file about a third bigger and playback
+smoother). Its interval is at most 5 s, because each interval's frames are held in memory until the
+sharpest is known (about 1 GB per 2 s at 8K).
 
 How the sharp frame is chosen: each candidate is shrunk to a 640 px grey copy and scored by the variance
 of its Laplacian over the middle 60 % of the height (the stretched zenith and nadir are left out), so the
@@ -75,6 +87,7 @@ steadiest frame of each interval wins.
 | HEVC slideshow | Intel GPU (Quick Sync), else NVIDIA GPU (NVENC), else CPU (x265) |
 | H.264 slideshow up to 4096 px wide | Intel GPU, else NVIDIA GPU, else CPU (x264) |
 | H.264 wider than 4096 px, AV1 | CPU (x264, SVT-AV1) |
+| Chaptered video (HEVC) | Intel GPU (Quick Sync), else NVIDIA GPU, else CPU (x265) |
 | Reading HEVC | NVIDIA GPU (NVDEC), else any GPU through D3D11, else CPU |
 
 The preset's crf is turned into the GPU's constant quantizer with a table calibrated on real survey frames,
@@ -85,7 +98,8 @@ GPU off. **Tools > Check the GPU...** (or `shrink360.py gpu`) shows what the GPU
 ## Safety
 
 - Outputs go next to the original, named `<video> (360 slideshow 5s 5760px HEVC, 1.5s each).mp4` or
-  `<video> (360 frames 5s 3840px)\0012s 360.jpg`. Nothing is ever overwritten.
+  `<video> (360 frames 5s 3840px)\0012s 360.jpg` or `<video> (360 chapters 2s 7680px 12fps).mp4`.
+  Nothing is ever overwritten.
 - Every output is checked before it is moved into place: every frame decodes, count and length match,
   the 360 tags, keyframes and chapters are there.
 - **Originals are never changed or deleted**, except on request (right-click finished rows > **Send the

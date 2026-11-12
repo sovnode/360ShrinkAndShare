@@ -8,6 +8,9 @@ HEVC / H.264 / AV1 and as JPEGs, real-time length, 360 tags, skipping repeats wh
 still, sound (copied and re-encoded), and peak memory.
 1.1: the GPU encoders (NVIDIA and Intel) and GPU decoding, the CPU fallback when a GPU can't do a size or
 fails part-way, one chapter per panorama, keyframes, and the HEVC Main profile of x265 slideshows.
+1.2: chaptered video (24 fps clip -> 12 fps, a chapter on the one sharp frame of every 2 s, odd frames
+included, the chapter frames as keyframes at a better quality than the frames between, sound kept) on every
+encoder here.
 GPU checks are reported as skipped on a PC without that GPU. Conversions are logged to
 selftest\\selftest-log.jsonl, never to the real conversion log.
 """
@@ -98,10 +101,11 @@ def blurred(a):
 
 
 def make_clip(path, w, h, seconds, codec="libx265", sharp_seconds=None, still_from=None, audio=False,
-              tag=None, frame_fn=None, pix_fmt="yuv420p"):
+              tag=None, frame_fn=None, pix_fmt="yuv420p", fps=None):
     """Encode a test clip; keyframe every second. sharp_seconds: only these whole seconds are sharp."""
     if os.path.exists(path):
         return path
+    FPS = fps or globals()["FPS"]
     sharp = base_image(w, h)
     soft = blurred(sharp)
     oc = av.open(path + ".tmp", "w", format="mp4")
@@ -188,7 +192,22 @@ def build_clips():
                       frame_fn=lambda t, f=fisheye_frame(3840, 1920): f),
             make_clip(os.path.join(DIR, "ordinary_16x9.mp4"), 1920, 1080, 4, codec="libx264"),
             make_clip(os.path.join(DIR, "stereo_top_bottom.mp4"), 2880, 2880, 6, codec="libx264", tag="top-bottom"),
-            make_clip(os.path.join(DIR, "8k_10bit.mp4"), 7680, 3840, 6, tag="mono", pix_fmt="yuv420p10le"))
+            make_clip(os.path.join(DIR, "8k_10bit.mp4"), 7680, 3840, 6, tag="mono", pix_fmt="yuv420p10le"),
+            make_clip(os.path.join(DIR, "4k_24fps_chapters.mp4"), 3840, 1920, 8, tag="mono", audio=True, fps=24,
+                      frame_fn=_chapter_frame()))
+
+
+CHAPTER_SHARP = (13, 59, 100, 155)                         # the one sharp frame in each 2 s window (24 fps)
+
+
+def _chapter_frame():
+    sharp = base_image(3840, 1920, seed=5)
+    soft = blurred(sharp)
+
+    def fn(t):
+        i = int(round(t * 24))
+        return np.roll(sharp if i in CHAPTER_SHARP else soft, i * 16, axis=1)
+    return fn
 
 
 def main():
@@ -205,7 +224,7 @@ def main():
     print("Building test clips in %s ..." % DIR, flush=True)
     import subprocess                                      # separate process, so the memory check below
     subprocess.run([sys.executable, os.path.abspath(__file__), "--build"], check=True)   # covers conversions only
-    clip8k, clip_untagged, clip_fish, clip_flat, clip_stereo, clip10 = build_clips()
+    clip8k, clip_untagged, clip_fish, clip_flat, clip_stereo, clip10, clip_ch = build_clips()
 
     print("\nDetection", flush=True)
     kinds = {clip8k: "360", clip_untagged: "360", clip_fish: "fisheye", clip_flat: "not-360", clip_stereo: "360"}
@@ -375,6 +394,40 @@ def main():
     print("\nStereo top-bottom keeps its stereo tag", flush=True)
     r = run(clip_stereo, "compact")
     check("stereo output tagged top-bottom", mp4meta.read_spherical(r["output"])["stereo"] == "top-bottom")
+
+    print("\nChaptered video (whole video at 12 fps, a chapter on the sharpest frame of every 2 s)", flush=True)
+    encs = [("auto", None)] + [(e, n) for e, n in (("intel", "hevc_qsv"), ("nvidia", "hevc_nvenc"))
+                               if engine.gpu_available(n, 3840, 1920)[0]] + [("cpu", "libx265")]
+    for enc, want in encs:
+        r = run(clip_ch, "chapters", ["encoder=" + enc], out=os.path.join(OUT, "chapters-" + enc))
+        ok = r["status"] == "done"
+        check("chapters, encoder=%s: made and checked" % enc, ok, r["message"])
+        if not ok:
+            continue
+        if want:
+            check("chapters, encoder=%s: made with %s" % (enc, want), r.get("encoder") == want, str(r.get("encoder")))
+        chs = chapters_of(r["output"])
+        times = [t for t, _ in chs[1:]]
+        check("chapters, encoder=%s: 'Start' at 0, then one on each sharp frame (odd frames too)" % enc,
+              len(chs) == 5 and chs[0] == (0.0, "Start") and
+              all(abs(t - i / 24.0) < 0.01 for t, i in zip(times, CHAPTER_SHARP)),
+              " ".join("%.3f %s" % c for c in chs))
+        check("chapters, encoder=%s: 12 fps plus the odd chapter frames (99 of 192)" % enc, r["frames"] == 99,
+              str(r["frames"]))
+        with av.open(r["output"]) as c:
+            vs = c.streams.video[0]
+            sizes = [(p.is_keyframe, p.size) for p in c.demux(vs) if p.pts is not None]
+            has_audio = bool(c.streams.audio)
+            dur = c.duration / 1e6
+        keys = [z for k, z in sizes if k]
+        other = sorted(z for k, z in sizes if not k)
+        check("chapters, encoder=%s: chapter frames are keyframes, stored better than the frames between" % enc,
+              len(keys) >= 4 and min(keys) > 3 * other[len(other) // 2],
+              "keyframes %d, smallest %d B, median other %d B" % (len(keys), min(keys), other[len(other) // 2]))
+        check("chapters, encoder=%s: sound kept, length 8 s" % enc, has_audio and abs(dur - 8) < 0.3,
+              "%.2f s" % dur)
+    p = presets.normalize(dict(presets.find("chapters"), interval=6))
+    check("chapters: interval over 5 s refused", any("interval" in e for e in presets.validate(p)))
 
     print("\nNever overwrites, never converts non-360", flush=True)
     r = run(clip8k, "standard")

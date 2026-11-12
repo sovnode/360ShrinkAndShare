@@ -13,7 +13,7 @@ import os
 import sys
 
 APP_NAME = "360 Video Shrinker"
-VERSION = "1.1"
+VERSION = "1.2"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DATA_DIR = r"%LOCALAPPDATA%\360 Video Shrinker"

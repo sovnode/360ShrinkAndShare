@@ -241,6 +241,8 @@ def output_path(src, p, w, h, out_dir=None):
     folder = out_dir or os.path.dirname(os.path.abspath(src))
     if p["output"] == "photos":
         return os.path.join(folder, "%s (360 frames %s)" % (stem, label))
+    if p["output"] == "chapters":
+        return os.path.join(folder, "%s (360 chapters %s %dfps).mp4" % (stem, label, CHAPTER_FPS))
     label += " " + CODEC_LABELS[p["codec"]]
     if p["timing"] == "hold":
         label += ", %ss each" % presetlib.fmt_num(p["hold"])
@@ -782,6 +784,169 @@ def _make_video(src, info, p, width, height, out, progress, cancel, encoder=None
     return frames, decoder
 
 
+# ------------------------------------------------------------------ writing a chaptered video (1.2)
+# The whole video stays playable, at 12 frames a second, and in every interval the sharpest frame (any frame,
+# not only the source's keyframes) becomes a full-quality IDR keyframe with a chapter on it, so VLC's
+# Shift+N / Shift+P land on it. The frames between are kept at a lower quality. One reading pass: each
+# interval's frames are held in memory until it ends (about 1 GB per 2 s at 8K).
+# Measured on a 43 s 8K X6 export (652 MB): Quick Sync medium q26-38 about 27 MB in about 80 s, chapter
+# frames as sharp as the original (edge width within 1 %), the frames between about 37.5 dB PSNR.
+
+CHAPTER_FPS = 12
+CHAPTER_MAX_INTERVAL = 5.0                       # memory: the frames of one interval are held until it ends
+CHAPTER_SPEEDS = {"hevc_qsv": {"fast": "veryfast", "medium": "medium", "slow": "veryslow"},
+                  "hevc_nvenc": {"fast": "p1", "medium": "p7", "slow": "p7"},
+                  "libx265": {"fast": "fast", "medium": "medium", "slow": "slow"}}
+
+
+def _chapter_stream(oc, p, width, height, name, tb):
+    key, mid = int(p["chapter_qp"]), int(p["between_qp"])
+    speed = CHAPTER_SPEEDS[name][p["speed"]]
+    if name == "hevc_qsv":
+        pix = "nv12"
+        opts = {"preset": speed, "flags": "+qscale", "global_quality": str(mid * QSV_LAMBDA),
+                "i_qfactor": "1", "i_qoffset": str(key - mid), "forced_idr": "1"}
+    elif name == "hevc_nvenc":
+        pix = "nv12"
+        opts = {"preset": speed, "tune": "hq", "rc": "constqp", "init_qpI": str(key), "init_qpP": str(mid),
+                "init_qpB": str(mid), "forced-idr": "1", "profile": "main"}
+    else:
+        # x265 at constant QP: the frames between at qp, I frames (only the chapter frames) at qp - 6*log2(ipratio)
+        pix = "yuv420p"
+        n = ENCODE_THREADS
+        opts = {"preset": speed, "forced-idr": "1",
+                "x265-params": "keyint=100000:min-keyint=1:scenecut=0:bframes=0:qp=%d:ipratio=%.4f:rc-lookahead=4"
+                               ":frame-threads=%d:pools=%d:log-level=error"
+                               % (mid, 2 ** ((mid - key) / 6.0), max(1, n // 2), max(2, n * 2))}
+    st = oc.add_stream(name, options=opts)
+    st.width, st.height, st.pix_fmt = width, height, pix
+    st.time_base = tb
+    cc = st.codec_context
+    cc.time_base = tb
+    cc.framerate = Fraction(CHAPTER_FPS)
+    cc.gop_size = 100000 if name == "libx265" else 1000
+    cc.max_b_frames = 0
+    cc.codec_tag = "hvc1"
+    return st, pix
+
+
+def _make_chapters(src, info, p, width, height, out, progress, cancel, encoder, hwdec=False):
+    """-> (frames written, decoder used). Sets info['_chapters'] (the number of chapters)."""
+    ic, dev = _open_source(src, info, hwdec)
+    try:
+        vs = ic.streams.video[0]
+        cc_in = vs.codec_context
+        cc_in.thread_type = "AUTO"
+        cc_in.thread_count = max(DECODE_THREADS, 8)           # every frame is decoded here
+        tb = vs.time_base
+        start = vs.start_time or 0
+        t0 = float(start * tb)
+        dur = info.get("duration") or 0.0
+        step = max(1, int(round((info.get("fps") or 24.0) / CHAPTER_FPS)))
+        interval = p["interval"]
+        oc = av.open(out, "w", format="mp4", options={"movflags": "+disable_chpl"})
+        try:
+            vst, pix = _chapter_stream(oc, p, width, height, encoder, tb)
+            audio = None
+            if p["audio"] != "none" and ic.streams.audio:
+                audio = _AudioOut(oc, ic.streams.audio[0], p["audio"], t0)
+            oc.metadata["title"] = os.path.splitext(os.path.basename(src))[0]
+            oc.metadata["comment"] = "%s %s: %s; encoder %s. From %s" % (
+                paths.APP_NAME, paths.VERSION, presetlib.summary(p), encoder, os.path.basename(src))
+            if info.get("creation_time"):
+                oc.metadata["creation_time"] = info["creation_time"]
+            kw = {"format": pix}
+            if width != info["width"]:
+                kw.update(width=width, height=height, interpolation="AREA")
+            state = {"frames": 0, "last_pts": None}
+            chap_t = []
+            buf = []                                  # [frame, score, kept] of the current interval
+            win = {"cur": None, "best": -1.0}
+
+            def write(fr, chapter):
+                ef = fr.reformat(**kw)
+                ef.pts = fr.pts - start
+                if state["last_pts"] is not None and ef.pts <= state["last_pts"]:
+                    ef.pts = state["last_pts"] + 1
+                state["last_pts"] = ef.pts
+                ef.time_base = tb
+                ef.pict_type = PictureType.I if chapter else PictureType.NONE
+                for pkt in vst.encode(ef):
+                    oc.mux(pkt)
+                state["frames"] += 1
+
+            def flush():
+                if not buf:
+                    return
+                bi = max(range(len(buf)), key=lambda i: buf[i][1])
+                chap_t.append(max(0.0, float((buf[bi][0].pts - start) * tb)))
+                for i, (fr, _s, kept) in enumerate(buf):
+                    if i == bi or kept:
+                        write(fr, i == bi)
+                buf.clear()
+                win["best"] = -1.0
+
+            n = 0
+            last_report = 0.0
+            streams = [vs] + ([ic.streams.audio[0]] if audio else [])
+            for pkt in ic.demux(*streams):
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled()
+                if audio is not None and pkt.stream is not vs:
+                    audio.packet(pkt)
+                    continue
+                for fr in pkt.decode():
+                    if fr.pts is None:
+                        continue
+                    t = float((fr.pts - start) * tb)
+                    w = int(max(t, 0.0) // interval)
+                    if win["cur"] is not None and w != win["cur"]:
+                        flush()
+                    win["cur"] = w
+                    kept = n % step == 0
+                    s = sharpness(_gray_small(fr))
+                    if kept or s > win["best"]:
+                        if not kept:                  # an earlier frame that is neither kept nor the best can go
+                            buf[:] = [e for e in buf if e[2]]
+                        buf.append([fr, s, kept])
+                    win["best"] = max(win["best"], s)
+                    n += 1
+                    now = time.monotonic()
+                    if progress and now - last_report > 0.25:
+                        last_report = now
+                        progress(min(t / dur, 1.0) if dur else 0.0,
+                                 "%s of %s read, %d chapters" % (_mmss(t), _mmss(dur), len(chap_t)))
+            flush()                                   # (demux's last, empty packet already drained the decoder)
+            if not state["frames"]:
+                raise RuntimeError("no frames could be read from the video")
+            for pkt in vst.encode(None):
+                oc.mux(pkt)
+            if audio:
+                audio.close()
+            end_ms = max(int(round(dur * 1000)), int(round(chap_t[-1] * 1000)) + 1)
+            starts = [int(round(x * 1000)) for x in chap_t]
+            for i in range(1, len(starts)):               # chapter starts must increase
+                starts[i] = max(starts[i], starts[i - 1] + 1)
+            titles = [_clock(x, True) for x in chap_t]
+            if starts[0] > 0:
+                # an MP4 chapter track always starts its first chapter at 0, which would move the first sharp
+                # frame's chapter to the start: give the start a chapter of its own
+                starts, titles = [0] + starts, ["Start"] + titles
+            oc.set_chapters([{"id": i + 1, "start": ms, "end": starts[i + 1] if i + 1 < len(starts) else
+                              max(end_ms, ms + 1), "time_base": Fraction(1, 1000),
+                              "metadata": {"title": titles[i]}} for i, ms in enumerate(starts)])
+            info["_chapters"] = len(starts)
+            info["_sharp_frames"] = len(chap_t)
+            frames = state["frames"]
+        finally:
+            oc.close()
+        decoder = _decoder_used(ic, dev)
+    finally:
+        ic.close()
+    mp4meta.inject_spherical(out, stereo=info.get("stereo") or "mono", software=paths.APP_NAME)
+    return frames, decoder
+
+
 # ------------------------------------------------------------------ writing JPEG panoramas
 
 def _exif(info, t, src):
@@ -848,6 +1013,8 @@ def verify_output(path, p, frames, info):
                 if b"GPano:ProjectionType" not in fh.read(256 * 1024):
                     problems.append("360 photo tag missing")
         return {"ok": not problems, "problem": "; ".join(problems), "frames": len(files)}
+    if p["output"] == "chapters":
+        return _verify_chapters(path, p, frames, info)
     c = av.open(path)
     try:
         vs = c.streams.video[0]
@@ -877,6 +1044,50 @@ def verify_output(path, p, frames, info):
         problems.append("sound missing")
     return {"ok": not problems, "problem": "; ".join(problems), "frames": n, "duration": dur, "audio": has_audio,
             "chapters": chapters, "keyframes": ki["keyframes"] if ki else None}
+
+
+def _verify_chapters(path, p, frames, info):
+    """Chaptered video: count the frames (packets, not decoded: 8K is slow to decode), decode every keyframe,
+    and check that every chapter starts on a keyframe, plus the length, the sound and the 360 tags."""
+    problems = []
+    c = av.open(path)
+    try:
+        vs = c.streams.video[0]
+        _limit_decoder(vs)
+        n, keys, decoded = 0, [], 0
+        for pkt in c.demux(vs):
+            if pkt.pts is None:
+                continue
+            n += 1
+            if pkt.is_keyframe:
+                keys.append(int(round(float(pkt.pts * vs.time_base) * 1000)))
+                decoded += len(pkt.decode())
+        decoded += len(vs.codec_context.decode(None))
+        if decoded < len(keys):
+            problems.append("only %d of %d keyframes decode" % (decoded, len(keys)))
+        dur = c.duration / 1e6 if c.duration else 0.0
+        has_audio = bool(c.streams.audio)
+        chapters = [int(round(float(ch["start"] * ch["time_base"]) * 1000)) for ch in c.chapters()]
+    finally:
+        c.close()
+    if n != frames:
+        problems.append("%d frames, expected %d" % (n, frames))
+    want = info.get("_chapters")
+    if want is not None and len(chapters) != want:
+        problems.append("%d chapters, expected %d" % (len(chapters), want))
+    off = [ms for ms in chapters if not any(abs(ms - k) <= 2 for k in keys)]
+    if off:
+        problems.append("%d chapters don't start on a keyframe" % len(off))
+    sph = mp4meta.read_spherical(path)
+    if not (sph["v1"] and sph["v2"] and sph["projection"] == "equirectangular"):
+        problems.append("360 tag missing")
+    src_dur = info.get("duration") or 0.0
+    if src_dur and abs(dur - src_dur) > max(1.0, 0.02 * src_dur):
+        problems.append("length %.1f s, original %.1f s" % (dur, src_dur))
+    if p["audio"] != "none" and info.get("audio") and not has_audio:
+        problems.append("sound missing")
+    return {"ok": not problems, "problem": "; ".join(problems), "frames": n, "duration": dur, "audio": has_audio,
+            "chapters": len(chapters), "keyframes": len(keys)}
 
 
 # ------------------------------------------------------------------ the whole job
@@ -924,7 +1135,7 @@ def convert(src, p, out_dir=None, progress=None, cancel=None, allow_download=Fal
         if p["output"] == "photos":
             attempts, notes = ([(None, True), (None, False)] if gpu else [(None, False)]), []
         else:
-            plan, notes = encoder_plan(p, width, height)
+            plan, notes = encoder_plan(dict(p, codec="hevc") if p["output"] == "chapters" else p, width, height)
             attempts = ([(e, True) for e in plan[:-1]] + [(plan[-1], True)]) if gpu else []
             attempts.append((plan[-1], False))
         k = 0
@@ -939,6 +1150,8 @@ def convert(src, p, out_dir=None, progress=None, cancel=None, allow_download=Fal
             try:
                 if p["output"] == "photos":
                     frames, decoder = _make_photos(src, info, p, width, height, work, progress, cancel, hwdec)
+                elif p["output"] == "chapters":
+                    frames, decoder = _make_chapters(src, info, p, width, height, work, progress, cancel, enc, hwdec)
                 else:
                     frames, decoder = _make_video(src, info, p, width, height, work, progress, cancel, enc, hwdec)
                 if progress:
@@ -977,8 +1190,13 @@ def convert(src, p, out_dir=None, progress=None, cancel=None, allow_download=Fal
                    skipped_repeats=info.get("_skipped_repeats", 0), keyframes_only=info.get("_keyframes_only"),
                    encoder=enc, decoder=decoder, made_on=made_on, notes=notes)
         status = "done"
-        message = "%d panoramas, %s (%s of the original), %s" % (
-            frames, human(res["output_size"]), ratio_text(res["output_size"], res["source_size"]), made_on)
+        what = ("%d sharp-frame chapters (%d frames)" % (info.get("_sharp_frames", 0), frames)
+                if p["output"] == "chapters" else "%d panoramas" % frames)
+        if p["output"] == "chapters":
+            res["chapters"] = info.get("_chapters", 0)
+            res["sharp_frames"] = info.get("_sharp_frames", 0)
+        message = "%s, %s (%s of the original), %s" % (
+            what, human(res["output_size"]), ratio_text(res["output_size"], res["source_size"]), made_on)
         if notes:
             message += "; " + "; ".join(notes)
     except Cancelled:
@@ -1124,6 +1342,15 @@ def estimate_output(info, p):
     if p["output"] == "photos":
         per = _interp(_JPEG_MB, p["jpeg_quality"]) * scale
         return int(frames * per * 1e6)
+    if p["output"] == "chapters":
+        # measured: 8K X6 export, Quick Sync medium q26-38, 0.63 MB per second of video; each qp step about 6 %
+        rate = 0.63 * (width * height / (7680.0 * 3840.0)) ** 0.72
+        rate *= 0.94 ** (p["between_qp"] - 38) * 0.98 ** (p["chapter_qp"] - 26)
+        audio = 0
+        if p["audio"] != "none" and info.get("audio"):
+            kbps = _AUDIO_KBPS.get(p["audio"]) or ((info["audio"].get("bitrate") or 192000) / 1000.0)
+            audio = kbps * 1000 / 8 * info["duration"]
+        return int(rate * 1e6 * info["duration"] + audio)
     per = _interp(_MB_PER_FRAME[p["codec"]], p["crf"]) * scale
     if p["keyframe_every"] > 1:
         per *= 0.6                                       # rough: inter frames between keyframes

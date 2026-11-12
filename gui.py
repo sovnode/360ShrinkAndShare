@@ -83,7 +83,7 @@ def _readme():
 class PresetEditor(tk.Toplevel):
     FIELD_ORDER = ["name", "description", "output", "interval", "width", "pick", "search", "skip_unchanged",
                    "timing", "hold", "codec", "crf", "encoder", "speed", "keyframe_every", "audio", "jpeg_quality",
-                   "menu"]
+                   "chapter_qp", "between_qp", "menu"]
 
     def __init__(self, master, items, on_save):
         super().__init__(master)
@@ -115,7 +115,7 @@ class PresetEditor(tk.Toplevel):
             "name": ("Name", "entry", None, "shown in the menus; letters, digits, spaces , . ( ) + & ' _ -"),
             "description": ("Description", "entry", None, ""),
             "output": ("Make", "combo", L["output"], ""),
-            "interval": ("Interval", "spin", (0.5, 3600, 0.5), "seconds between panoramas"),
+            "interval": ("Interval", "spin", (0.5, 3600, 0.5), "seconds between panoramas (chapters: at most 5)"),
             "width": ("Width", "combo-edit", ["original", "7680", "5760", "3840", "2880", "1920"],
                       "pixels, or original; height follows the video; never enlarged"),
             "pick": ("Pick", "combo", L["pick"], ""),
@@ -133,6 +133,10 @@ class PresetEditor(tk.Toplevel):
                                "panoramas; 1 = every panorama (instant stepping), higher = a little smaller"),
             "audio": ("Sound", "combo", L["audio"], "only with Real time; off in the built-in presets"),
             "jpeg_quality": ("JPEG quality", "spin", (30, 100, 1), "for Photos"),
+            "chapter_qp": ("Chapter frames qp", "spin", (10, 51, 1),
+                           "for Chaptered video: 26 = as sharp as the original; lower = bigger"),
+            "between_qp": ("Frames between qp", "spin", (10, 51, 1),
+                           "for Chaptered video: 38 = small, softer while playing; 34 = a third bigger"),
             "menu": ("Right-click menu", "check", "Show this preset in the File Explorer right-click menu", ""),
         }
         self.hints = {}
@@ -227,15 +231,26 @@ class PresetEditor(tk.Toplevel):
         timing = rev["timing"].get(self.vars["timing"].get(), "real")
         codec = rev["codec"].get(self.vars["codec"].get(), "hevc")
         video = out == "video"
+        chapters = out == "chapters"
         for key in ("timing", "codec", "crf", "speed", "keyframe_every"):
             self.widgets[key].configure(state="readonly" if (video and key in ("timing", "codec", "speed")) else
                                         ("normal" if video else "disabled"))
         self.widgets["hold"].configure(state="normal" if video and timing == "hold" else "disabled")
-        self.widgets["audio"].configure(state="readonly" if video and timing == "real" else "disabled")
-        self.widgets["jpeg_quality"].configure(state="disabled" if video else "normal")
+        self.widgets["audio"].configure(state="readonly" if (video and timing == "real") or chapters else "disabled")
+        self.widgets["jpeg_quality"].configure(state="normal" if out == "photos" else "disabled")
+        for key in ("pick", "search", "skip_unchanged"):
+            self.widgets[key].configure(state="disabled" if chapters else ("normal" if key == "skip_unchanged"
+                                                                           else "readonly"))
+        for key in ("chapter_qp", "between_qp"):
+            self.widgets[key].configure(state="normal" if chapters else "disabled")
+        if chapters:
+            self.widgets["speed"].configure(state="readonly")
+        self.hints["speed"].configure(text="Chaptered video: Medium = Quick Sync medium / NVIDIA p7" if chapters
+                                      else "CPU encoders only")
         self.widgets["encoder"].configure(state="readonly")
         self.hints["encoder"].configure(
-            text="Photos: the GPU reads the video" if not video else
+            text="HEVC; Automatic = Intel GPU, then NVIDIA, then the CPU" if chapters else
+            "Photos: the GPU reads the video" if not video else
             "AV1 is always made on the CPU" if codec == "av1" else
             "the GPU is set to the same picture quality as the CPU")
         self.hints["crf"].configure(text=presetlib.CRF_HINT.get(codec, "") + "; lower = better and bigger")
