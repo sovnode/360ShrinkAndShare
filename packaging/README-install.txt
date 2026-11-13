@@ -6,10 +6,12 @@ look all around every spot of a walk-through. It keeps ONE SHARP PANORAMA EVERY 
 either
 - a 360 slideshow (.mp4): each panorama shown 1.5 s, every one a chapter named by its time in the
   original, tagged as 360 so VLC opens it in its look-around view; or
-- a folder of 360 JPEG panoramas, each tagged as a 360 photo.
+- a folder of 360 JPEG panoramas, each tagged as a 360 photo; or
+- a 12 fps video: the whole video at 12 frames a second with its sound, a chapter on the sharpest
+  frame of every 2 s (pause, then Shift+N / Shift+P in VLC).
 
 Works with equirectangular 360 videos (as exported by Insta360 Studio and similar) up to 8K, 8- and
-10-bit, H.264 or HEVC. Typical result with the Standard preset: 1/60 to 1/170 of the original's size.
+10-bit, H.264 or HEVC. Typical result with Slideshow movie full quality: 1/60 to 1/170 of the original's size.
 The GPU does the heavy work where the PC has one (Intel Quick Sync, NVIDIA NVENC), otherwise the CPU;
 a 4-minute 5.7K survey takes about 15 seconds with a recent GPU.
 
@@ -35,16 +37,16 @@ JPEG panoramas open in 360 photo viewers (they carry the 360-photo tag); any ima
 as flat 2:1 pictures.
 
 
-PRESETS (all silent, each panorama shown 1.5 s, GPU = Automatic)
-  Standard     - 1 panorama / 5 s at full resolution, HEVC        about 1/60 (5.7K) to 1/170 (4K)
-  Detail       - 1 / 2 s at full resolution, HEVC, a bit sharper  about 1/22 to 1/58
-  Compact      - 1 / 5 s at 3840 px, HEVC                          about 1/96 at 5.7K
-  Small        - 1 / 10 s at 2880 px, skips repeated views         about 1/330 to 1/670
-  Any player   - like Compact but H.264, for PCs without HEVC     about 1/62 to 1/107
-  Photos       - folder of 3840 px JPEG panoramas, one every 5 s   about 1/37 to 1/46
+PRESETS (every one picks the sharpest frame of its interval; slideshows are silent, 1.5 s per panorama)
+  Reduce frame rate to 12fps    - the whole video at 12 fps with its sound, every frame at the same
+                                  quality (qp 26, NVIDIA GPU), a chapter on the sharpest frame of every 2 s
+  Slideshow movie full quality  - 1 panorama / 5 s at full resolution, HEVC   about 1/60 (5.7K) to 1/170 (4K)
+  Slideshow movie low quality   - 1 / 5 s at 2880 px, HEVC, skips repeated views
+  Slideshow high compatibility  - 1 / 5 s at full resolution, H.264, for PCs without HEVC
+  Converter to 360 photos       - folder of full-resolution JPEG panoramas, one every 5 s
 Presets > Edit presets... makes new ones or changes these (interval, width, codec, quality, GPU,
 which ones show in the right-click menu). "Restore built-in presets" brings back any you deleted.
-HEVC plays in VLC everywhere; if another player can't play a slideshow, use Any player (H.264).
+HEVC plays in VLC everywhere; if another player can't play a slideshow, use Slideshow high compatibility (H.264).
 
 
 WHERE FILES GO, AND WHAT IS NEVER DONE

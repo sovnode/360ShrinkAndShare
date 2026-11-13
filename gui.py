@@ -83,7 +83,7 @@ def _readme():
 class PresetEditor(tk.Toplevel):
     FIELD_ORDER = ["name", "description", "output", "interval", "width", "pick", "search", "skip_unchanged",
                    "timing", "hold", "codec", "crf", "encoder", "speed", "keyframe_every", "audio", "jpeg_quality",
-                   "chapter_qp", "between_qp", "menu"]
+                   "video_qp", "menu"]
 
     def __init__(self, master, items, on_save):
         super().__init__(master)
@@ -133,10 +133,8 @@ class PresetEditor(tk.Toplevel):
                                "panoramas; 1 = every panorama (instant stepping), higher = a little smaller"),
             "audio": ("Sound", "combo", L["audio"], "only with Real time; off in the built-in presets"),
             "jpeg_quality": ("JPEG quality", "spin", (30, 100, 1), "for Photos"),
-            "chapter_qp": ("Chapter frames qp", "spin", (10, 51, 1),
-                           "for Chaptered video: 26 = as sharp as the original; lower = bigger"),
-            "between_qp": ("Frames between qp", "spin", (10, 51, 1),
-                           "for Chaptered video: 38 = small, softer while playing; 34 = a third bigger"),
+            "video_qp": ("12 fps video qp", "spin", (10, 51, 1),
+                         "for 12 fps video, every frame: 26 = close to the original; 22 = 70 % bigger; lower = better"),
             "menu": ("Right-click menu", "check", "Show this preset in the File Explorer right-click menu", ""),
         }
         self.hints = {}
@@ -241,11 +239,10 @@ class PresetEditor(tk.Toplevel):
         for key in ("pick", "search", "skip_unchanged"):
             self.widgets[key].configure(state="disabled" if chapters else ("normal" if key == "skip_unchanged"
                                                                            else "readonly"))
-        for key in ("chapter_qp", "between_qp"):
-            self.widgets[key].configure(state="normal" if chapters else "disabled")
+        self.widgets["video_qp"].configure(state="normal" if chapters else "disabled")
         if chapters:
             self.widgets["speed"].configure(state="readonly")
-        self.hints["speed"].configure(text="Chaptered video: Medium = Quick Sync medium / NVIDIA p7" if chapters
+        self.hints["speed"].configure(text="12 fps video: Medium = Quick Sync medium / NVIDIA p7" if chapters
                                       else "CPU encoders only")
         self.widgets["encoder"].configure(state="readonly")
         self.hints["encoder"].configure(

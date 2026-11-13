@@ -23,7 +23,7 @@ WHAT IT ADDS
 - Your presets and conversion log go in %LOCALAPPDATA%\360 Video Shrinker.
 
 USE
-Open the program, add videos (or a folder), pick a preset (Standard is a good start), press Start.
+Open the program, add videos (or a folder), pick a preset (Slideshow movie full quality is a good start), press Start.
 The slideshow is saved next to the original video. Originals are never changed or deleted unless you
 ask (and then they go to the Recycle Bin). Watch the slideshows in VLC (free, videolan.org): drag to
 look around, Shift+N / Shift+P for the next / previous panorama. Tools > Read me in the program window

@@ -786,11 +786,12 @@ def _make_video(src, info, p, width, height, out, progress, cancel, encoder=None
 
 # ------------------------------------------------------------------ writing a chaptered video (1.2)
 # The whole video stays playable, at 12 frames a second, and in every interval the sharpest frame (any frame,
-# not only the source's keyframes) becomes a full-quality IDR keyframe with a chapter on it, so VLC's
-# Shift+N / Shift+P land on it. The frames between are kept at a lower quality. One reading pass: each
-# interval's frames are held in memory until it ends (about 1 GB per 2 s at 8K).
-# Measured on a 43 s 8K X6 export (652 MB): Quick Sync medium q26-38 about 27 MB in about 80 s, chapter
-# frames as sharp as the original (edge width within 1 %), the frames between about 37.5 dB PSNR.
+# not only the source's keyframes) becomes an IDR keyframe with a chapter on it, so VLC's Shift+N / Shift+P
+# land on it. Every frame has the same quantizer (video_qp): with softer frames between the chapter frames
+# the whole video looked soft while it played. One reading pass: each interval's frames are held in memory
+# until it ends (about 1 GB per 2 s at 8K).
+# Measured on a 43 s 8K X6 export (652 MB), NVENC p7: qp 22 = 197 MB in 68 s, every frame 43-44 dB PSNR and
+# edge width equal to the original's; qp 26 = 58 % of that size, about 1.5 dB lower.
 
 CHAPTER_FPS = 12
 CHAPTER_MAX_INTERVAL = 5.0                       # memory: the frames of one interval are held until it ends
@@ -800,7 +801,7 @@ CHAPTER_SPEEDS = {"hevc_qsv": {"fast": "veryfast", "medium": "medium", "slow": "
 
 
 def _chapter_stream(oc, p, width, height, name, tb):
-    key, mid = int(p["chapter_qp"]), int(p["between_qp"])
+    key = mid = int(p["video_qp"])
     speed = CHAPTER_SPEEDS[name][p["speed"]]
     if name == "hevc_qsv":
         pix = "nv12"
@@ -811,7 +812,7 @@ def _chapter_stream(oc, p, width, height, name, tb):
         opts = {"preset": speed, "tune": "hq", "rc": "constqp", "init_qpI": str(key), "init_qpP": str(mid),
                 "init_qpB": str(mid), "forced-idr": "1", "profile": "main"}
     else:
-        # x265 at constant QP: the frames between at qp, I frames (only the chapter frames) at qp - 6*log2(ipratio)
+        # x265 at constant QP: ipratio 1 gives the I frames (the chapter frames) the same qp as the others
         pix = "yuv420p"
         n = ENCODE_THREADS
         opts = {"preset": speed, "forced-idr": "1",
@@ -1343,9 +1344,9 @@ def estimate_output(info, p):
         per = _interp(_JPEG_MB, p["jpeg_quality"]) * scale
         return int(frames * per * 1e6)
     if p["output"] == "chapters":
-        # measured: 8K X6 export, Quick Sync medium q26-38, 0.63 MB per second of video; each qp step about 6 %
-        rate = 0.63 * (width * height / (7680.0 * 3840.0)) ** 0.72
-        rate *= 0.94 ** (p["between_qp"] - 38) * 0.98 ** (p["chapter_qp"] - 26)
+        # measured: 8K X6 export, NVENC p7: 4.57 MB per second of video at qp 22, 58 % of that at qp 26
+        rate = 2.65 * (width * height / (7680.0 * 3840.0)) ** 0.72
+        rate *= 0.873 ** (p["video_qp"] - 26)
         audio = 0
         if p["audio"] != "none" and info.get("audio"):
             kbps = _AUDIO_KBPS.get(p["audio"]) or ((info["audio"].get("bitrate") or 192000) / 1000.0)

@@ -27,15 +27,15 @@ FIELDS = {
     "keyframe_every": (int, (1, 600), 1),
     "audio":          (str, ("none", "speech", "standard", "copy"), "none"),   # sound is off unless a preset turns it on
     "jpeg_quality":   (int, (30, 100), 88),
-    # chaptered video (1.2): GPU quantizer of the chapter frames and of the frames between (lower = better, bigger)
-    "chapter_qp":     (int, (10, 51), 26),
-    "between_qp":     (int, (10, 51), 38),
+    # 12 fps video (1.2): the quantizer of every frame (lower = better, bigger). One setting on purpose: with softer
+    # frames between the chapter frames, the whole video looks soft while it plays.
+    "video_qp":       (int, (10, 51), 26),
     "menu":           (bool, None, True),                # show in the Explorer right-click menu
 }
 
 LABELS = {
     "output": {"video": "Video (360 slideshow .mp4)", "photos": "Photos (360 JPEG panoramas)",
-               "chapters": "Chaptered video (whole video at 12 fps, a chapter on the sharpest frame)"},
+               "chapters": "12 fps video (whole video, a chapter on the sharpest frame)"},
     "pick": {"sharpest": "Sharpest frame in each interval", "nearest": "Frame nearest each interval mark"},
     "search": {"auto": "Auto", "keyframes": "Keyframes only (fast)", "every": "Every 0.5 s (thorough, slow)"},
     "timing": {"real": "Real time (timeline matches the original; can have sound)",
@@ -61,35 +61,30 @@ def _p(**kw):
     return d
 
 
-DEFAULTS = [            # all built-in presets: 1.5 s per panorama, silent (audio="none"), GPU = auto
-    # Sizes measured with 1.1 (GPU) on a 5.7K HEVC survey and a 4K H.264 survey
-    _p(name="Standard - 5 s, full resolution", audio="none",
-       description="One panorama every 5 s at the video's own resolution (up to 8K), HEVC. "
+DEFAULTS = [            # slideshows: 1.5 s per panorama, silent, GPU = auto; every preset picks the sharpest frame
+    _p(name="Reduce frame rate to 12fps", output="chapters", interval=2.0, speed="medium", audio="copy",
+       encoder="nvidia",
+       description="Keeps the whole video at 12 frames a second with its sound, every frame at qp 26 on the NVIDIA "
+                   "GPU. The sharpest frame of every 2 s gets a chapter: pause, then Shift+N / Shift+P in VLC."),
+    _p(name="Slideshow movie full quality", audio="none",
+       description="One panorama every 5 s at the video's own resolution (up to 8K), HEVC, each shown 1.5 s. "
                    "Measured: 1/59 of a 5.7K survey, 1/174 of a 4K one."),
-    _p(name="Detail - 2 s, full resolution", interval=2.0, crf=28, audio="none",
-       description="One panorama every 2 s at full resolution, HEVC, for walk-throughs you will study closely. "
-                   "Measured: 1/22 (5.7K), 1/58 (4K)."),
-    _p(name="Compact - 5 s, 4K", width=3840, audio="none",
-       description="One panorama every 5 s at 3840 px, HEVC. Measured: 1/96 of a 5.7K survey "
-                   "(a 4K video comes out the same as with Standard)."),
-    _p(name="Small - 10 s, 2880 px", interval=10.0, width=2880, crf=32, skip_unchanged=True, audio="none",
-       description="One panorama every 10 s at 2880 px, skips repeats when the camera stands still. "
-                   "Measured: 1/330 (5.7K), 1/668 (4K)."),
-    _p(name="Any player - 5 s, 4K, H.264", width=3840, codec="h264", crf=24, audio="none",
-       description="H.264 instead of HEVC at 3840 px, for PCs that can't play HEVC. Measured: 1/62 (5.7K), 1/107 (4K)."),
-    _p(name="Chapters - 2 s, whole video 12 fps", output="chapters", interval=2.0, speed="medium", audio="copy",
-       description="Keeps the whole video (12 frames a second, original sound) and puts a chapter on the sharpest "
-                   "frame of every 2 s, stored at full quality: pause, then Shift+N / Shift+P in VLC. "
-                   "Measured: 1/24 of an 8K X6 export."),
-    _p(name="Photos - 5 s, 4K JPEG", output="photos", width=3840, audio="none",
-       description="A folder of 360 JPEG panoramas (3840 px, quality 88), one every 5 s, "
-                   "a good size for sharing. Measured: 1/37 (5.7K), 1/46 (4K)."),
+    _p(name="Slideshow movie low quality", width=2880, crf=32, skip_unchanged=True, audio="none",
+       description="One panorama every 5 s at 2880 px, HEVC, each shown 1.5 s; skips repeats when the camera "
+                   "stands still."),
+    _p(name="Slideshow high compatibility", codec="h264", crf=24, audio="none",
+       description="One panorama every 5 s at the video's own resolution, H.264 instead of HEVC, for PCs that "
+                   "can't play HEVC; each shown 1.5 s."),
+    _p(name="Converter to 360 photos", output="photos", audio="none",
+       description="A folder of 360 JPEG panoramas at the video's own resolution (quality 88), one every 5 s."),
 ]
 
 
 def normalize(p):
     """Coerce a preset dict to the schema; unknown keys are dropped, missing ones get defaults."""
     out = {}
+    if "video_qp" not in p and "chapter_qp" in p:     # presets saved before the two settings became one
+        p = dict(p, video_qp=p["chapter_qp"])
     for key, (typ, rng, default) in FIELDS.items():
         v = p.get(key, default)
         try:
@@ -213,8 +208,8 @@ def summary(p):
     if p["output"] == "chapters":
         where = {"auto": "GPU when available", "nvidia": "NVIDIA GPU", "intel": "Intel GPU", "cpu": "CPU"}[p["encoder"]]
         sound = LABELS["audio"][p["audio"]].split(" (")[0].lower()
-        return ("Chaptered video, 12 fps, a chapter on the sharpest frame every %s s, %s, HEVC qp %d (chapters) / "
-                "%d (between) (%s), %s" % (fmt_num(p["interval"]), res, p["chapter_qp"], p["between_qp"], where, sound))
+        return ("Whole video at 12 fps, a chapter on the sharpest frame every %s s, %s, HEVC qp %d (%s), %s"
+                % (fmt_num(p["interval"]), res, p["video_qp"], where, sound))
     timing = "real time" if p["timing"] == "real" else "%s s each" % fmt_num(p["hold"])
     sound = LABELS["audio"][p["audio"]].split(" (")[0].lower() if p["timing"] == "real" else "no sound"
     where = {"auto": "GPU when available", "nvidia": "NVIDIA GPU", "intel": "Intel GPU", "cpu": "CPU"}[p["encoder"]]

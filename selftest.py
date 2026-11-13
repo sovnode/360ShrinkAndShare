@@ -9,7 +9,7 @@ still, sound (copied and re-encoded), and peak memory.
 1.1: the GPU encoders (NVIDIA and Intel) and GPU decoding, the CPU fallback when a GPU can't do a size or
 fails part-way, one chapter per panorama, keyframes, and the HEVC Main profile of x265 slideshows.
 1.2: chaptered video (24 fps clip -> 12 fps, a chapter on the one sharp frame of every 2 s, odd frames
-included, the chapter frames as keyframes at a better quality than the frames between, sound kept) on every
+included, the chapter frames as keyframes, every frame at one quality setting, sound kept) on every
 encoder here.
 GPU checks are reported as skipped on a PC without that GPU. Conversions are logged to
 selftest\\selftest-log.jsonl, never to the real conversion log.
@@ -172,8 +172,17 @@ def fisheye_frame(w, h):
     return a
 
 
+# The presets the checks run with: fixed here, so renaming or removing a preset in the app changes nothing
+TEST_PRESETS = {"standard": presets._p(name="standard"),
+                "compact": presets._p(name="compact", width=3840),
+                "any player": presets._p(name="any player", width=3840, codec="h264", crf=24),
+                "photos": presets._p(name="photos", output="photos", width=3840),
+                "chapters": presets._p(name="chapters", output="chapters", interval=2.0, speed="medium",
+                                       audio="copy")}
+
+
 def run(src, preset_name, overrides=(), out=OUT):
-    p = presets.apply_overrides(presets.find(preset_name), list(overrides))
+    p = presets.apply_overrides(TEST_PRESETS[preset_name], list(overrides))
     t = time.time()
     r = engine.convert(src, p, out_dir=out)
     r["wall"] = time.time() - t
@@ -421,12 +430,15 @@ def main():
             dur = c.duration / 1e6
         keys = [z for k, z in sizes if k]
         other = sorted(z for k, z in sizes if not k)
-        check("chapters, encoder=%s: chapter frames are keyframes, stored better than the frames between" % enc,
-              len(keys) >= 4 and min(keys) > 3 * other[len(other) // 2],
+        check("chapters, encoder=%s: the chapter frames are keyframes" % enc,
+              len(keys) >= 4 and min(keys) > other[len(other) // 2],
               "keyframes %d, smallest %d B, median other %d B" % (len(keys), min(keys), other[len(other) // 2]))
         check("chapters, encoder=%s: sound kept, length 8 s" % enc, has_audio and abs(dur - 8) < 0.3,
               "%.2f s" % dur)
-    p = presets.normalize(dict(presets.find("chapters"), interval=6))
+    p = presets.normalize(dict(TEST_PRESETS["chapters"], interval=6))
+    old = presets.normalize({"name": "old", "output": "chapters", "chapter_qp": 24, "between_qp": 38})
+    check("chapters: a preset saved with the two old quality settings loads with one (the chapter one)",
+          old["video_qp"] == 24 and "between_qp" not in old, str(old.get("video_qp")))
     check("chapters: interval over 5 s refused", any("interval" in e for e in presets.validate(p)))
 
     print("\nNever overwrites, never converts non-360", flush=True)

@@ -7,14 +7,15 @@ seconds** and writes either
 - a **360 slideshow** (`.mp4`): each panorama shown 1.5 s, every one a keyframe and a chapter named by
   its time in the original, tagged as 360 so VLC opens it in its look-around view; or
 - a **folder of 360 JPEG panoramas**, each tagged as a 360 photo (GPano); or
-- a **chaptered video** (new in 1.2): the whole video stays playable, at 12 frames a second with its
-  sound, and the sharpest frame of every 2 s (any frame, not only the original's keyframes) is stored at
-  full quality as a keyframe with a chapter on it. Play it as a video, or pause and press Shift+N /
-  Shift+P to jump from sharp frame to sharp frame. About 1/24 of an 8K export.
+- a **12 fps video** (new in 1.2): the whole video stays playable, at 12 frames a second with its
+  sound and every frame at the same quality, and the sharpest frame of every 2 s (any frame, not only the
+  original's keyframes) is a keyframe with a chapter on it. Play it as a video, or pause and press
+  Shift+N / Shift+P to jump from sharp frame to sharp frame. About 1/3 of an 8K export at qp 22
+  (as sharp as the original), about 1/6 at qp 26 (the default).
 
 Works with equirectangular 360 videos up to 8K (7680 x 3840), 8- and 10-bit, H.264 or HEVC, mono or
-stereo. Typical result: **1/20 to 1/600 of the original's size** (1/60 to 1/170 with the Standard
-preset). The GPU does the heavy work where there is one, so a 4-minute 5.7K survey takes about 15
+stereo. Typical result: **1/20 to 1/600 of the original's size** (1/60 to 1/170 with the full-quality
+slideshow preset). The GPU does the heavy work where there is one, so a 4-minute 5.7K survey takes about 15
 seconds with a recent GPU.
 
 Windows 10 / 11, 64-bit.
@@ -52,29 +53,30 @@ python selftest.py               checks everything on synthetic clips (a few min
 - **Shift+N / Shift+P**: next / previous panorama (they are chapters). **Playback > Chapter** lists them
   by their time in the original video.
 - **E** (next frame) also steps one panorama at a time.
-- Chaptered videos: play normally, or pause and use **Shift+N / Shift+P**: each chapter is the sharpest
-  frame of its 2 s, at the original's quality. The frames between are softer (they are only for playing).
+- 12 fps videos: play normally, or pause and use **Shift+N / Shift+P**: each chapter is the sharpest
+  frame of its 2 s. Every frame has the same quality.
 
 ## Presets
 
-| Preset | What it makes | 5.7K HEVC video | 4K H.264 video |
-|---|---|---|---|
-| Standard - 5 s, full resolution | 1 panorama / 5 s at the video's own resolution, HEVC crf 30 | 1/59 | 1/174 |
-| Detail - 2 s, full resolution | 1 / 2 s, HEVC crf 28 | 1/22 | 1/58 |
-| Compact - 5 s, 4K | 1 / 5 s at 3840 px, HEVC crf 30 | 1/96 | same as Standard |
-| Small - 10 s, 2880 px | 1 / 10 s at 2880 px, HEVC crf 32, skips repeats | 1/330 | 1/668 |
-| Any player - 5 s, 4K, H.264 | like Compact but H.264, for PCs without HEVC | 1/62 | 1/107 |
-| Photos - 5 s, 4K JPEG | folder of 3840 px JPEG panoramas, quality 88 | 1/37 | 1/46 |
-| Chapters - 2 s, whole video 12 fps | the whole video at 12 fps with sound, a full-quality chapter frame every 2 s | 1/24 of an 8K video | |
+| Preset | What it makes |
+|---|---|
+| Reduce frame rate to 12fps | the whole video at 12 fps with its sound, every frame at qp 26 (NVIDIA GPU), a chapter on the sharpest frame of every 2 s |
+| Slideshow movie full quality | 1 panorama / 5 s at the video's own resolution, HEVC crf 30 (measured: 1/59 of a 5.7K video, 1/174 of a 4K one) |
+| Slideshow movie low quality | 1 / 5 s at 2880 px, HEVC crf 32, skips repeats |
+| Slideshow high compatibility | 1 / 5 s at the video's own resolution, H.264 crf 24, for PCs without HEVC |
+| Converter to 360 photos | folder of JPEG panoramas at the video's own resolution, quality 88, 1 / 5 s |
+
+Every preset picks the sharpest frame of its interval.
 
 Edit them in the window (**Edit presets...**): interval, width, sharpest or nearest frame, codec (HEVC,
 H.264, AV1), quality, GPU, timing (1.5 s per panorama or the original's clock, with sound), skipping
 repeats while the camera stands still, and which presets appear in the right-click menu.
 
-A chaptered video has two quality settings of its own: **Chapter frames qp** (26: as sharp as the
-original) and **Frames between qp** (38: small; 34 makes the file about a third bigger and playback
-smoother). Its interval is at most 5 s, because each interval's frames are held in memory until the
-sharpest is known (about 1 GB per 2 s at 8K).
+A 12 fps video has one quality setting of its own, **12 fps video qp**, used for every frame (26 by
+default; 22 measured as sharp as the original and about 70 % bigger). There is no separate quality for the
+frames between chapters: with softer frames between, the whole video looks soft while it plays. Its
+interval is at most 5 s, because each interval's frames are held in memory until the sharpest is known
+(about 1 GB per 2 s at 8K).
 
 How the sharp frame is chosen: each candidate is shrunk to a 640 px grey copy and scored by the variance
 of its Laplacian over the middle 60 % of the height (the stretched zenith and nadir are left out), so the
@@ -87,7 +89,7 @@ steadiest frame of each interval wins.
 | HEVC slideshow | Intel GPU (Quick Sync), else NVIDIA GPU (NVENC), else CPU (x265) |
 | H.264 slideshow up to 4096 px wide | Intel GPU, else NVIDIA GPU, else CPU (x264) |
 | H.264 wider than 4096 px, AV1 | CPU (x264, SVT-AV1) |
-| Chaptered video (HEVC) | Intel GPU (Quick Sync), else NVIDIA GPU, else CPU (x265) |
+| 12 fps video (HEVC) | the preset's GPU (built-in preset: NVIDIA; Automatic = Intel, then NVIDIA), else CPU (x265) |
 | Reading HEVC | NVIDIA GPU (NVDEC), else any GPU through D3D11, else CPU |
 
 The preset's crf is turned into the GPU's constant quantizer with a table calibrated on real survey frames,
