@@ -1,9 +1,11 @@
-"""360 Video Shrinker - command line (for scripts and bulk runs). The window is app.pyw.
+"""360 Shrink and Share - command line (for scripts and bulk runs). The window is app.pyw.
 
   python shrink360.py presets [--json]
   python shrink360.py probe FILE... [--preset NAME] [--allow-download] [--json]
   python shrink360.py scan FOLDER... [--min-mb 20] [--include-appdata] [--preset NAME] [--report out.csv] [--json]
-  python shrink360.py convert FILE... --preset NAME [--out DIR] [--set key=value ...] [--allow-download] [--quiet] [--json]
+  python shrink360.py convert FILE... --preset NAME [--html] [--out DIR] [--set key=value ...] [--allow-download] [--quiet] [--json]
+  python shrink360.py html PATH... [--out DIR] [--width N|original] [--quality Q] [--json]
+        (a 360 .mp4, or a folder of 360 photos, that is already on disk -> one .html browser page beside it)
   python shrink360.py recycle FILE... [--yes] [--json]
   python shrink360.py gpu [--json]                            (what the GPUs here can encode and decode)
   python shrink360.py log [--last N] [--json]
@@ -13,6 +15,8 @@ FILE may be @list.txt (one path per line). Nothing is ever overwritten; original
 'recycle --yes', which sends them to the Recycle Bin and only when the log holds a checked conversion
 of exactly that file. Online-only OneDrive files are skipped unless --allow-download is given.
 Conversions use the GPU when the preset's encoder allows it (--set encoder=cpu for the CPU only).
+--html packs the result of any preset into one .html file that opens in Edge or Chrome with its own 360 viewer
+(a video or slideshow plays there without VLC; photos become an album with arrow keys and thumbnails).
 """
 import argparse
 import csv
@@ -130,7 +134,7 @@ def cmd_scan(a):
 def cmd_convert(a):
     import engine
     import presets
-    pre = presets.apply_overrides(presets.find(a.preset), a.set)
+    pre = presets.apply_overrides(presets.find(a.preset), a.set + (["html=true"] if a.html else []))
     engine.cleanup_work()
     results = []
     files = _files(a.files)
@@ -160,6 +164,40 @@ def cmd_convert(a):
         out = sum(r["output_size"] or 0 for r in done)
         print("\n%d of %d converted: %s -> %s" % (len(done), len(files), engine.human(src), engine.human(out)))
     return 0 if all(r["status"] in ("done", "skipped") for r in results) else 1
+
+
+def cmd_html(a):
+    import engine
+    import htmlpack
+    width = "auto" if a.width is None else None if a.width.lower() in ("original", "orig", "full") else int(a.width)
+    out, bad = [], 0
+    for f in _files(a.paths):
+        rec = {"source": os.path.abspath(f)}
+        try:
+            info = htmlpack.pack(f, out_dir=a.out, width=width, quality=a.quality)
+            chk = htmlpack.verify(info["output"], info)
+            if not chk["ok"]:
+                os.remove(info["output"])
+                raise RuntimeError("check failed: " + chk["problem"])
+            rec.update(status="done", output=info["output"], output_size=info["output_size"], kind=info["kind"],
+                       items=info["pieces"] if info["kind"] == "photos" else info.get("chapters"),
+                       warning=info.get("warning") or "", skipped=info.get("skipped") or [])
+        except Exception as e:  # noqa: BLE001 - reported per file
+            rec.update(status="failed", message="%s: %s" % (type(e).__name__, e))
+            bad += 1
+        out.append(rec)
+        if not a.json:
+            if rec["status"] == "done":
+                what = "%d photos" % rec["items"] if rec["kind"] == "photos" else "video"
+                print("DONE    %s, %s\n    -> %s" % (what, engine.human(rec["output_size"]), rec["output"]))
+                for note in [rec["warning"]] + rec["skipped"]:
+                    if note:
+                        print("    note: %s" % note)
+            else:
+                print("FAILED  %s\n    %s" % (f, rec["message"]))
+    if a.json:
+        _dump(out)
+    return 1 if bad else 0
 
 
 def cmd_recycle(a):
@@ -223,7 +261,7 @@ def cmd_menu(a):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="shrink360", description="360 Video Shrinker %s" % paths.VERSION)
+    ap = argparse.ArgumentParser(prog="shrink360", description="360 Shrink and Share %s" % paths.VERSION)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("presets")
     s.add_argument("--json", action="store_true")
@@ -246,7 +284,14 @@ def main(argv=None):
     s.add_argument("--out")
     s.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
     s.add_argument("--allow-download", action="store_true")
+    s.add_argument("--html", action="store_true", help="pack the result into one browser page (.html)")
     s.add_argument("--quiet", action="store_true")
+    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("html")
+    s.add_argument("paths", nargs="+")
+    s.add_argument("--out")
+    s.add_argument("--width", help="photos: reduce wider photos to this many pixels (default: 8192; 'original' = never)")
+    s.add_argument("--quality", type=int, help="photos that are reduced: JPEG quality (default 85)")
     s.add_argument("--json", action="store_true")
     s = sub.add_parser("recycle")
     s.add_argument("files", nargs="+")
@@ -261,7 +306,7 @@ def main(argv=None):
     s.add_argument("action", choices=["install", "remove", "status"])
     a = ap.parse_args(argv)
     return {"presets": cmd_presets, "probe": cmd_probe, "scan": cmd_scan, "convert": cmd_convert,
-            "recycle": cmd_recycle, "gpu": cmd_gpu, "log": cmd_log, "menu": cmd_menu}[a.cmd](a) or 0
+            "html": cmd_html, "recycle": cmd_recycle, "gpu": cmd_gpu, "log": cmd_log, "menu": cmd_menu}[a.cmd](a) or 0
 
 
 if __name__ == "__main__":

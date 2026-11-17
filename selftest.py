@@ -11,6 +11,8 @@ fails part-way, one chapter per panorama, keyframes, and the HEVC Main profile o
 1.2: chaptered video (24 fps clip -> 12 fps, a chapter on the one sharp frame of every 2 s, odd frames
 included, the chapter frames as keyframes, every frame at one quality setting, sound kept) on every
 encoder here.
+1.3: browser pages (one .html with the video or the photos inside and its own 360 viewer): made, read back,
+and opened from disk in headless Edge and Chrome, where the picture, the mouse, the keys and playback are checked.
 GPU checks are reported as skipped on a PC without that GPU. Conversions are logged to
 selftest\\selftest-log.jsonl, never to the real conversion log.
 """
@@ -26,6 +28,7 @@ from fractions import Fraction
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths  # noqa: E402
 import engine  # noqa: E402
+import htmlpack  # noqa: E402
 import mp4meta  # noqa: E402
 import presets  # noqa: E402
 
@@ -440,6 +443,75 @@ def main():
     check("chapters: a preset saved with the two old quality settings loads with one (the chapter one)",
           old["video_qp"] == 24 and "between_qp" not in old, str(old.get("video_qp")))
     check("chapters: interval over 5 s refused", any("interval" in e for e in presets.validate(p)))
+
+    print("\nBrowser pages (1.3): the result packed into one .html, read back, and opened in Edge and Chrome",
+          flush=True)
+    pages = []
+    r = run(clip8k, "photos", ["html=true"])
+    ok = r["status"] == "done" and r["output"].endswith("(360 album 5s 3840px).html") and os.path.isfile(r["output"])
+    check("photo album page made and checked", ok and (r.get("check") or {}).get("page", {}).get("ok"), r["message"])
+    if ok:
+        meta, n, _total, _sha = htmlpack.read_packed(r["output"])
+        check("album holds the 5 sharp photos with their times and thumbnails",
+              n == 5 and [i["label"] for i in meta["items"]] == ["0:00", "0:06", "0:12", "0:18", "0:24"]
+              and all(i["thumb"].startswith("data:image/jpeg;base64,") for i in meta["items"]),
+              ", ".join(i["label"] for i in meta["items"]))
+        pages.append(r["output"])
+    for label, clip, preset, over in (("HEVC slideshow", clip8k, "compact", ["html=true"]),
+                                      ("H.264 slideshow", clip_untagged, "any player", ["html=true"]),
+                                      ("12 fps video with sound", clip_ch, "chapters", ["html=true"])):
+        r = run(clip, preset, over)
+        ok = r["status"] == "done" and r["output"].endswith(".html")
+        page = (r.get("check") or {}).get("page", {})
+        check("%s page made, checked, in the streaming form" % label, ok and page.get("ok") and page.get("streaming"),
+              r["message"])
+        if ok:
+            meta = htmlpack.read_packed(r["output"])[0]["video"]
+            check("%s page lists its chapters%s" % (label, " and has sound" if preset == "chapters" else ""),
+                  len(meta["chapters"]) == r.get("chapters", r["frames"]) and (preset != "chapters" or meta["audio"]),
+                  "%d chapters, %s" % (len(meta["chapters"]), meta["mse"]))
+            pages.append(r["output"])
+    frames_dir = next((os.path.join(OUT, d) for d in sorted(os.listdir(OUT)) if "(360 frames" in d
+                       and os.path.isdir(os.path.join(OUT, d))), None)
+    if frames_dir:
+        info = htmlpack.pack(frames_dir, width=2880)
+        check("a folder of photos already on disk -> album, reduced to the width asked for",
+              htmlpack.verify(info["output"], info)["ok"] and "2880 × 1440" in htmlpack.read_packed(
+                  info["output"])[0]["subtitle"], os.path.basename(info["output"]))
+        try:
+            htmlpack.pack(frames_dir, width=2880)
+            check("an existing page is not overwritten", False)
+        except FileExistsError:
+            check("an existing page is not overwritten", True)
+    flat_dir = os.path.join(OUT, "not 360")
+    os.makedirs(flat_dir, exist_ok=True)
+    Image.new("RGB", (1920, 1080), (90, 120, 150)).save(os.path.join(flat_dir, "ordinary.jpg"))
+    try:
+        htmlpack.pack(flat_dir)
+        check("ordinary (not 2:1) photos are refused", False)
+    except ValueError as e:
+        check("ordinary (not 2:1) photos are refused", "not a 360 photo" in str(e), str(e))
+    limit = htmlpack.MAX_VIDEO_BYTES
+    htmlpack.MAX_VIDEO_BYTES = 600 * 1000              # the estimate (about 760 KB) passes, the real 1.1 MB doesn't
+    try:
+        r = run(clip8k, "standard", ["width=1920", "html=true"], out=os.path.join(OUT, "too-big"))
+    finally:
+        htmlpack.MAX_VIDEO_BYTES = limit
+    check("a video too big for a page is kept as the .mp4, and the result says so",
+          r["status"] == "done" and r["output"].endswith(".mp4") and os.path.isfile(r["output"])
+          and "no browser page" in r["message"], r["message"])
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+    import browsertest
+    _ok, rows = browsertest.run(pages, quiet=True)
+    for name in ("edge", "chrome"):
+        mine = [x for x in rows if x[0] == name]
+        if any(x[3] is None for x in mine):
+            skip("pages open in %s" % name, "not installed")
+            continue
+        bad = ["%s: %s (%s)" % (x[1][-34:], x[2], x[4]) for x in mine if x[3] is False]
+        check("%s, pages opened from disk: pictures show, drag and wheel work, arrow keys step, video plays "
+              "(%d checks on %d pages)" % (name.capitalize(), len(mine), len(pages)), not bad and len(mine) > 0,
+              "; ".join(bad))
 
     print("\nNever overwrites, never converts non-360", flush=True)
     r = run(clip8k, "standard")

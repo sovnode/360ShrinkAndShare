@@ -1,4 +1,4 @@
-"""360 Video Shrinker - starts the window. Shortcut: "360 Video Shrinker.lnk" (pythonw app.pyw).
+"""360 Shrink and Share - starts the window. Shortcut: "360 Shrink and Share.lnk" (pythonw app.pyw).
 
 The Explorer right-click menu runs:
   pythonw app.pyw --enqueue --preset NAME FILE    convert FILE with that preset now

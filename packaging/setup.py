@@ -1,4 +1,4 @@
-"""360 Video Shrinker - per-user installer and uninstaller (no admin rights).
+"""360 Shrink and Share - per-user installer and uninstaller (no admin rights).
 
 Run by Install.cmd (from the unzipped package) and by Uninstall.cmd (in the installed folder), with the
 Python that ships in the package. Standard library only.
@@ -6,9 +6,9 @@ Python that ships in the package. Standard library only.
   setup.py install   [--dir DIR] [--data-dir DIR] [--shortcut-dir DIR] [--no-desktop] [--instance NAME] [--quiet]
   setup.py uninstall [--dir DIR] [--remove-data | --keep-data] [--quiet]
 
-Installed:   %LOCALAPPDATA%\\Programs\\360 Video Shrinker\\  (python\\, app\\, Uninstall.cmd, install-record.json)
-Data:        %LOCALAPPDATA%\\360 Video Shrinker\\             (presets, settings, conversion log, work folder)
-Shortcuts:   Start menu and Desktop "360 Video Shrinker"
+Installed:   %LOCALAPPDATA%\\Programs\\360 Shrink and Share\\  (python\\, app\\, Uninstall.cmd, install-record.json)
+Data:        %LOCALAPPDATA%\\360 Shrink and Share\\             (presets, settings, conversion log, work folder)
+Shortcuts:   Start menu and Desktop "360 Shrink and Share"
 Explorer:    right-click menu (HKCU\\Software\\Classes, per user)
 Apps list:   HKCU\\...\\Uninstall\\Video360Shrinker (Settings > Apps > Installed apps can uninstall it)
 --instance is for testing beside a real install: it renames the menu key, window and Apps-list entry.
@@ -22,8 +22,9 @@ import sys
 import time
 import winreg
 
-APP_NAME = "360 Video Shrinker"
-VERSION = "1.1"
+APP_NAME = "360 Shrink and Share"
+OLD_NAME = "360 Video Shrinker"                 # the name until 1.2
+VERSION = "1.3"
 HERE = os.path.dirname(os.path.abspath(__file__))           # payload\ in the package
 LOCAL = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
 DEFAULT_DIR = os.path.join(LOCAL, "Programs", APP_NAME)
@@ -62,7 +63,7 @@ def make_shortcut(lnk, target, args, workdir, icon):
     cmd = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut(%s);$s.TargetPath=%s;$s.Arguments=%s;"
            "$s.WorkingDirectory=%s;$s.IconLocation=%s;$s.Description=%s;$s.Save()"
            % (ps_quote(lnk), ps_quote(target), ps_quote(args), ps_quote(workdir), ps_quote(icon),
-              ps_quote("Shrink 360 videos into 360 slideshows or panoramas")))
+              ps_quote("Shrink 360 videos and share them as slideshows, photos or browser pages")))
     r = ps(cmd)
     if r.returncode != 0 or not os.path.exists(lnk):
         raise RuntimeError("Could not make the shortcut %s: %s" % (lnk, (r.stderr or "").strip()[:300]))
@@ -109,7 +110,7 @@ def register_apps_entry(target, instance, size_kb):
     unins = os.path.join(target, "Uninstall.cmd")
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, key, 0, winreg.KEY_WRITE) as k:
         for name, val in (("DisplayName", APP_NAME + ((" (%s)" % instance) if instance else "")),
-                          ("DisplayVersion", VERSION), ("Publisher", "360 Video Shrinker"),
+                          ("DisplayVersion", VERSION), ("Publisher", "360 Shrink and Share"),
                           ("InstallLocation", target), ("DisplayIcon", os.path.join(target, "app", "icon.ico")),
                           ("UninstallString", 'cmd.exe /c "%s"' % unins), ("InstallDate", time.strftime("%Y%m%d"))):
             winreg.SetValueEx(k, name, 0, winreg.REG_SZ, val)
@@ -124,6 +125,23 @@ def remove_apps_entry(instance):
         pass
 
 
+def previous_install(instance, target):
+    """An install somewhere else (the folder had the old name, 360 Video Shrinker, until 1.2) -> (folder, its
+    install record), or None. Found through the Apps-list entry, which kept its key."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, uninstall_key(instance)) as k:
+            loc = winreg.QueryValueEx(k, "InstallLocation")[0]
+    except OSError:
+        return None
+    if not loc or os.path.normcase(os.path.abspath(loc)) == os.path.normcase(target):
+        return None
+    try:
+        with open(os.path.join(loc, RECORD), encoding="utf-8") as f:
+            return loc, json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 def folder_size(root):
     total = 0
     for dirpath, _, files in os.walk(root):
@@ -136,7 +154,7 @@ def folder_size(root):
 
 
 UNINSTALL_CMD = r"""@echo off
-rem 360 Video Shrinker - uninstall (removes the right-click menu, shortcuts and this folder)
+rem 360 Shrink and Share - uninstall (removes the right-click menu, shortcuts and this folder)
 "%~dp0python\python.exe" "%~dp0app\setup.py" uninstall --dir "%~dp0." %*
 if errorlevel 1 (
   echo.
@@ -146,7 +164,7 @@ if errorlevel 1 (
 )
 cd /d "%TEMP%"
 echo Removing "%~dp0" ...
-echo 360 Video Shrinker is uninstalled.
+echo 360 Shrink and Share is uninstalled.
 ping -n 3 127.0.0.1 >nul
 (goto) 2>nul & rmdir /s /q "%~dp0"
 """
@@ -161,11 +179,19 @@ def install(a):
         if not os.path.isdir(p):
             raise RuntimeError("The package is incomplete (%s is missing). Unzip the whole package and try again." % p)
     say("Installing %s %s" % (APP_NAME, VERSION), a.quiet)
+    prev = previous_install(a.instance, target)
+    if prev:
+        if app_running(prev[0]):
+            raise RuntimeError("%s is open. Close its window and run Install.cmd again." % OLD_NAME)
+        old_data = prev[1].get("data_dir")
+        if a.data_dir == DEFAULT_DATA and old_data and os.path.isdir(old_data):
+            data = os.path.abspath(old_data)             # the presets and the log stay where they are
+        say("  replacing the earlier install in %s (your presets and log are kept)" % prev[0], a.quiet)
     say("  program: %s" % target, a.quiet)
     say("  your presets and log: %s" % data, a.quiet)
     if os.path.isdir(target):
         if app_running(target):
-            raise RuntimeError("360 Video Shrinker is open. Close its window and run Install.cmd again.")
+            raise RuntimeError("360 Shrink and Share is open. Close its window and run Install.cmd again.")
         old = os.path.join(target, "app", "install.json")
         if os.path.exists(old):
             say("  an earlier install is there: replacing the program (your presets and log are kept)", a.quiet)
@@ -209,6 +235,14 @@ def install(a):
         run_app(target, "menu", "install")
         say("  right-click menu: added (File Explorer > right-click a video > Show more options)", a.quiet)
     register_apps_entry(target, a.instance, folder_size(target) // 1024)
+    if prev:                                             # the earlier install's shortcuts and program folder go
+        for lnk in prev[1].get("shortcuts", []):
+            if lnk not in shortcuts:
+                try:
+                    os.remove(lnk)
+                except OSError:
+                    pass
+        shutil.rmtree(prev[0], ignore_errors=True)
     with open(os.path.join(target, RECORD), "w", encoding="utf-8") as f:
         json.dump({"version": VERSION, "dir": target, "data_dir": data, "instance": a.instance,
                    "shortcuts": shortcuts, "menu": menu, "installed": time.strftime("%Y-%m-%d %H:%M:%S")}, f, indent=2)
@@ -225,9 +259,9 @@ def uninstall(a):
         with open(rec_path, encoding="utf-8") as f:
             rec = json.load(f)
     except (OSError, ValueError):
-        raise RuntimeError("%s is not a 360 Video Shrinker install (no %s)." % (target, RECORD))
+        raise RuntimeError("%s is not a 360 Shrink and Share install (no %s)." % (target, RECORD))
     if app_running(target):
-        raise RuntimeError("360 Video Shrinker is open (or converting). Close its window and try again.")
+        raise RuntimeError("360 Shrink and Share is open (or converting). Close its window and try again.")
     say("Uninstalling %s from %s" % (APP_NAME, target), a.quiet)
     try:
         run_app(target, "menu", "remove")

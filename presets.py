@@ -30,7 +30,10 @@ FIELDS = {
     # 12 fps video (1.2): the quantizer of every frame (lower = better, bigger). One setting on purpose: with softer
     # frames between the chapter frames, the whole video looks soft while it plays.
     "video_qp":       (int, (10, 51), 26),
-    "menu":           (bool, None, True),                # show in the Explorer right-click menu
+    # 1.3: pack the result into one .html file that opens in a browser (Edge, Chrome) with its own 360 viewer:
+    # the video or slideshow plays there without VLC; photos become an album (arrow keys, thumbnails).
+    "html":           (bool, None, False),
+    "menu":          (bool, None, True),                # show in the Explorer right-click menu
 }
 
 LABELS = {
@@ -77,7 +80,11 @@ DEFAULTS = [            # slideshows: 1.5 s per panorama, silent, GPU = auto; ev
                    "can't play HEVC; each shown 1.5 s."),
     _p(name="Converter to 360 photos", output="photos", audio="none",
        description="A folder of 360 JPEG panoramas at the video's own resolution (quality 88), one every 5 s."),
+    _p(name="360 photo album for a browser", output="photos", html=True, width=5760, jpeg_quality=85, audio="none",
+       description="One .html file that opens in Edge or Chrome with nothing to install: a 360 photo every 5 s "
+                   "(up to 5760 px), arrow keys for next and previous, drag to look around, scroll to zoom."),
 ]
+ALBUM_PRESET = "360 photo album for a browser"
 
 
 def normalize(p):
@@ -141,6 +148,10 @@ def load():
                     names = {p["name"].lower() for p in items}
                     items += [copy.deepcopy(p) for p in DEFAULTS
                               if p["output"] == "chapters" and p["name"].lower() not in names]
+            if data.get("version", 1) < 3:            # 1.3 adds the browser photo album preset once
+                if not any(p["html"] for p in items) and ALBUM_PRESET.lower() not in {p["name"].lower() for p in items}:
+                    items += [copy.deepcopy(p) for p in DEFAULTS if p["name"] == ALBUM_PRESET]
+            if data.get("version", 1) < 3:
                 items = save(items)
             return items
     except (OSError, ValueError, AttributeError):
@@ -163,7 +174,7 @@ def save(items):
     paths.ensure_dirs()
     tmp = paths.PRESETS_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"version": 2, "presets": items}, f, indent=2)
+        json.dump({"version": 3, "presets": items}, f, indent=2)
     os.replace(tmp, paths.PRESETS_FILE)
     return items
 
@@ -202,8 +213,18 @@ def fmt_num(x):
 
 
 def summary(p):
+    text = _summary(p)
+    if p.get("html"):
+        text += ", as one browser page (.html)"
+    return text
+
+
+def _summary(p):
     res = "full resolution" if p["width"] == "original" else "%d px" % p["width"]
     if p["output"] == "photos":
+        if p.get("html"):
+            return "360 photo album, a photo every %s s, %s, quality %d" % (fmt_num(p["interval"]), res,
+                                                                            p["jpeg_quality"])
         return "JPEG panoramas every %s s, %s, quality %d" % (fmt_num(p["interval"]), res, p["jpeg_quality"])
     if p["output"] == "chapters":
         where = {"auto": "GPU when available", "nvidia": "NVIDIA GPU", "intel": "Intel GPU", "cpu": "CPU"}[p["encoder"]]

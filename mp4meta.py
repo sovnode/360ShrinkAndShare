@@ -252,7 +252,7 @@ def _shift_chunk_offsets(moov, delta):
                 c.data = c.data[:8] + struct.pack(">%dQ" % n, *(o + delta for o in offs))
 
 
-def inject_spherical(path, stereo="mono", software="360 Video Shrinker"):
+def inject_spherical(path, stereo="mono", software="360 Shrink and Share"):
     """Tag the video track of an MP4 as equirectangular 360 (V1 + V2). Replaces any existing tags."""
     moov, off, old_size, boxes, end = load_moov(path)
     trak = video_trak(moov)

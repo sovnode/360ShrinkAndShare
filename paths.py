@@ -1,9 +1,9 @@
-"""Where 360 Video Shrinker keeps its program, data and libraries. Light module: no video imports.
+"""Where 360 Shrink and Share keeps its program, data and libraries. Light module: no video imports.
 
 The data folder (presets, log, queue, work) is, in order:
   1. the V360_DATA_DIR environment variable, if set;
   2. "data_dir" in install.json beside this file (written by the installer, setup.py);
-  3. %LOCALAPPDATA%\\360 Video Shrinker.
+  3. %LOCALAPPDATA%\\360 Shrink and Share.
 A developer copy run from a git checkout can put its own install.json beside this file (it is not
 committed). PyAV comes from "pylib" in install.json ("" = none: the packaged Python has it in
 site-packages), else from the pylib folder in the data folder, else from the Python's own site-packages.
@@ -12,11 +12,12 @@ import json
 import os
 import sys
 
-APP_NAME = "360 Video Shrinker"
-VERSION = "1.2"
+APP_NAME = "360 Shrink and Share"
+OLD_NAMES = ("360 Video Shrinker",)            # the name until 1.2: its files are still recognised
+VERSION = "1.3"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DATA_DIR = r"%LOCALAPPDATA%\360 Video Shrinker"
+DEFAULT_DATA_DIR = r"%LOCALAPPDATA%\360 Shrink and Share"
 
 
 def _install_config():

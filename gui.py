@@ -1,4 +1,4 @@
-"""360 Video Shrinker - the window (tkinter). Started by app.pyw; see README.md."""
+"""360 Shrink and Share - the window (tkinter). Started by app.pyw; see README.md."""
 import ctypes
 import json
 import os
@@ -83,7 +83,7 @@ def _readme():
 class PresetEditor(tk.Toplevel):
     FIELD_ORDER = ["name", "description", "output", "interval", "width", "pick", "search", "skip_unchanged",
                    "timing", "hold", "codec", "crf", "encoder", "speed", "keyframe_every", "audio", "jpeg_quality",
-                   "video_qp", "menu"]
+                   "video_qp", "html", "menu"]
 
     def __init__(self, master, items, on_save):
         super().__init__(master)
@@ -135,6 +135,8 @@ class PresetEditor(tk.Toplevel):
             "jpeg_quality": ("JPEG quality", "spin", (30, 100, 1), "for Photos"),
             "video_qp": ("12 fps video qp", "spin", (10, 51, 1),
                          "for 12 fps video, every frame: 26 = close to the original; 22 = 70 % bigger; lower = better"),
+            "html": ("Browser page", "check", "Pack the result into one .html file with its own 360 viewer",
+                     "opens in Edge or Chrome; no VLC needed"),
             "menu": ("Right-click menu", "check", "Show this preset in the File Explorer right-click menu", ""),
         }
         self.hints = {}
@@ -367,6 +369,9 @@ class MainWindow:
         m.add_command(label="Add videos...", command=self.add_files, accelerator="Ctrl+O")
         m.add_command(label="Add folder (find 360 videos)...", command=self.add_folder)
         m.add_separator()
+        m.add_command(label="Browser page from a 360 video or slideshow (.mp4)...", command=self.page_from_video)
+        m.add_command(label="Browser album from a folder of 360 photos...", command=self.page_from_folder)
+        m.add_separator()
         m.add_command(label="Remove selected from list", command=self.remove_selected)
         m.add_command(label="Clear finished", command=self.clear_finished)
         m.add_separator()
@@ -414,6 +419,13 @@ class MainWindow:
         ttk.Entry(out, textvariable=self.out_dir).pack(side="left", fill="x", expand=True)
         ttk.Button(out, text="Browse...", command=self.browse_out).pack(side="left", padx=(6, 0))
 
+        opt = ttk.Frame(r, padding=(8, 0, 8, 6))
+        opt.pack(fill="x")
+        self.html_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opt, text="Browser page (.html): one file that opens in Edge or Chrome with its own 360 "
+                                  "viewer, nothing to install", variable=self.html_var,
+                        command=self._html_changed).pack(side="left")
+
         mid = ttk.Frame(r, padding=(8, 0, 8, 0))
         mid.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(mid, columns=[c[0] for c in COLS], selectmode="extended")
@@ -455,6 +467,24 @@ class MainWindow:
         except KeyError:
             return None
 
+    def _row_preset(self, row):
+        """The row's preset, with the browser page switched on when the row asks for it."""
+        p = self._preset(row["preset"])
+        return dict(p, html=True) if p and row.get("html") else p
+
+    def _html_changed(self):
+        on = self.html_var.get()
+        for iid in self.order:
+            row = self.rows[iid]
+            if row["state"] in ("checking", "waiting", "stopped", "skipped") and not row["queued"] \
+                    and not row["autostart"]:
+                row["html"] = on
+                if row["state"] == "skipped" and row["message"].startswith("already converted"):
+                    row["state"], row["message"] = "waiting", ""
+                if row["info"] and row["state"] == "waiting":
+                    self._apply_probe(iid, row["info"])
+                self._refresh(iid)
+
     def _show_preset(self):
         p = self._preset(self.preset_var.get())
         self.preset_info.configure(text=(presetlib.summary(p) + (". " + p["description"] if p["description"] else ""))
@@ -477,7 +507,9 @@ class MainWindow:
         iid = self.tree.insert("", "end", text=os.path.basename(path))
         self.rows[iid] = {"iid": iid, "path": path, "preset": preset_name or self.preset_var.get(), "state": "checking",
                           "info": None, "result": None, "autostart": autostart, "message": "", "queued": False,
-                          "allow_download": False, "progress": None, "out_dir": None}
+                          "allow_download": False, "progress": None, "out_dir": None,
+                          # the window's "Browser page" box; a right-click job follows its preset alone
+                          "html": bool(self.html_var.get()) and not autostart}
         self.order.append(iid)
         if info is None:
             self.probe_q.put(iid)
@@ -491,7 +523,7 @@ class MainWindow:
         row["info"] = info
         if info["kind"] in ("360", "online-only"):
             row["state"] = "waiting"
-            p = self._preset(row["preset"])
+            p = self._row_preset(row)
             if p and info["kind"] == "360" and self.out_mode.get() == "next":
                 out = engine.output_path(row["path"], p, info["width"], info["height"])
                 if os.path.exists(out):
@@ -530,7 +562,7 @@ class MainWindow:
             saved = "%s, %s" % (engine.ratio_text(res.get("output_size"), src),
                                 engine.human(max(0, src - (res.get("output_size") or 0))))
         elif st == "waiting" and info.get("kind") == "360":
-            p = self._preset(row["preset"])
+            p = self._row_preset(row)
             est = engine.estimate_output(info, p) if p else None
             result = ("~" + engine.human(est)) if est else ""
         tags = ("done",) if st == "done" else ("bad",) if st == "failed" else ("muted",) if st in ("unusable",
@@ -709,7 +741,7 @@ class MainWindow:
                 row = self.rows[iid]
                 row["state"] = "running"
             self.events.put(("begin", iid))
-            p = self._preset(row["preset"])
+            p = self._row_preset(row)
             if p is None:
                 res = {"status": "failed", "message": "the preset '%s' no longer exists" % row["preset"]}
             else:
@@ -745,6 +777,8 @@ class MainWindow:
                         self._refresh(iid)
                         if self.rows[iid]["autostart"]:
                             self._schedule_autostart()
+                elif kind == "pages":
+                    self._pages_done(ev[1], ev[2])
                 elif kind == "begin":
                     row = self.rows[ev[1]]
                     row["progress"] = ""
@@ -837,6 +871,61 @@ class MainWindow:
                 self.order.remove(iid)
                 del self.rows[iid]
 
+    # ---------------------------------------------------------- browser pages from what is already on disk
+    def page_from_video(self):
+        files = filedialog.askopenfilenames(parent=self.root, title="360 videos or slideshows to pack into browser pages",
+                                            filetypes=[("MP4 video", "*.mp4 *.m4v *.mov")])
+        if files:
+            self._make_pages(list(files))
+
+    def page_from_folder(self):
+        d = filedialog.askdirectory(parent=self.root, title="Folder of 360 photos (.jpg) for a browser album")
+        if d:
+            self._make_pages([os.path.normpath(d)])
+
+    def _make_pages(self, sources):
+        if getattr(self, "page_thread", None) and self.page_thread.is_alive():
+            messagebox.showinfo(paths.APP_NAME, "A browser page is still being made. Try again when it is done.")
+            return
+        import htmlpack
+        self.status.configure(text="Making %d browser page%s..." % (len(sources), "" if len(sources) == 1 else "s"))
+
+        def work():
+            done, failed = [], []
+            for src in sources:
+                try:
+                    info = htmlpack.pack(src)
+                    chk = htmlpack.verify(info["output"], info)
+                    if not chk["ok"]:
+                        os.remove(info["output"])
+                        raise RuntimeError("check failed: " + chk["problem"])
+                    done.append(info)
+                except Exception as e:  # noqa: BLE001 - shown to the user
+                    failed.append("%s: %s" % (os.path.basename(src), e))
+            self.events.put(("pages", done, failed))
+
+        self.page_thread = threading.Thread(target=work, daemon=True)
+        self.page_thread.start()
+
+    def _pages_done(self, done, failed):
+        lines = []
+        for info in done:
+            what = "%d photos" % info["pieces"] if info["kind"] == "photos" else "video"
+            lines.append("%s (%s, %s)" % (os.path.basename(info["output"]), what, engine.human(info["output_size"])))
+            for note in [info.get("warning")] + list(info.get("skipped") or [])[:3]:
+                if note:
+                    lines.append("    note: " + note)
+        if failed:
+            lines += ["", "Not made:"] + failed
+        self.status.configure(text="%d browser page%s made." % (len(done), "" if len(done) == 1 else "s"))
+        if done and not failed and len(done) == 1:
+            if messagebox.askyesno(paths.APP_NAME, "Made, next to the original:\n\n" + "\n".join(lines)
+                                   + "\n\nOpen it in the browser?"):
+                os.startfile(done[0]["output"])
+        else:
+            (messagebox.showwarning if failed else messagebox.showinfo)(
+                paths.APP_NAME, ("Made, next to the originals:\n\n" if done else "") + "\n".join(lines))
+
     def browse_out(self):
         d = filedialog.askdirectory(parent=self.root, title="Save the outputs in")
         if d:
@@ -852,8 +941,8 @@ class MainWindow:
         out = self._output(iid)
         if not out:
             return
-        if os.path.isdir(out):
-            os.startfile(out)
+        if os.path.isdir(out) or out.lower().endswith(".html"):
+            os.startfile(out)                     # a folder, or a browser page in the default browser
         elif self.vlc:
             subprocess.Popen([self.vlc, out])
         else:
@@ -874,7 +963,8 @@ class MainWindow:
         out = self._output(iid)
         m = tk.Menu(self.root, tearoff=False)
         if out and os.path.isfile(out):
-            m.add_command(label="Play in VLC" if self.vlc else "Play", command=lambda: self.play(iid))
+            m.add_command(label="Open in the browser" if out.lower().endswith(".html") else
+                          "Play in VLC" if self.vlc else "Play", command=lambda: self.play(iid))
         if out:
             m.add_command(label="Show the output in its folder",
                           command=lambda: subprocess.Popen('explorer /select,"%s"' % out))

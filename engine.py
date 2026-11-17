@@ -34,6 +34,7 @@ from av.video.frame import PictureType  # noqa: E402
 import numpy as np           # noqa: E402
 from PIL import Image        # noqa: E402
 
+import htmlpack              # noqa: E402
 import mp4meta               # noqa: E402
 import presets as presetlib  # noqa: E402
 
@@ -202,7 +203,7 @@ def probe(path, allow_download=False):
             if ki:
                 info["key_spacing"] = ki["spacing"]
             info.update(projection=sph["projection"], stereo=sph["stereo"], tagged=bool(sph["projection"]))
-        if comment.startswith(paths.APP_NAME):
+        if comment.startswith((paths.APP_NAME,) + paths.OLD_NAMES):
             info.update(kind="slideshow", reason="already made by %s" % paths.APP_NAME)
             return info
         w, h = info["width"], info["height"]
@@ -239,14 +240,16 @@ def output_path(src, p, w, h, out_dir=None):
     stem = os.path.splitext(os.path.basename(src))[0]
     label = "%ss %dpx" % (presetlib.fmt_num(p["interval"]), width)
     folder = out_dir or os.path.dirname(os.path.abspath(src))
+    html = bool(p.get("html"))                    # one browser page instead of the .mp4 / the folder of photos
     if p["output"] == "photos":
-        return os.path.join(folder, "%s (360 frames %s)" % (stem, label))
+        return os.path.join(folder, ("%s (360 album %s).html" if html else "%s (360 frames %s)") % (stem, label))
+    ext = ".html" if html else ".mp4"
     if p["output"] == "chapters":
-        return os.path.join(folder, "%s (360 chapters %s %dfps).mp4" % (stem, label, CHAPTER_FPS))
+        return os.path.join(folder, "%s (360 chapters %s %dfps)%s" % (stem, label, CHAPTER_FPS, ext))
     label += " " + CODEC_LABELS[p["codec"]]
     if p["timing"] == "hold":
         label += ", %ss each" % presetlib.fmt_num(p["hold"])
-    return os.path.join(folder, "%s (360 slideshow %s).mp4" % (stem, label))
+    return os.path.join(folder, "%s (360 slideshow %s)%s" % (stem, label, ext))
 
 
 def size_of(path):
@@ -1123,9 +1126,17 @@ def convert(src, p, out_dir=None, progress=None, cancel=None, allow_download=Fal
     res["output"] = final
     if os.path.exists(final):
         return _finish(res, "skipped", "output already exists: %s" % os.path.basename(final), started)
+    html = bool(p.get("html"))
+    plain = output_path(src, dict(p, html=False), info["width"], info["height"], out_dir)   # the .mp4 / photo folder
+    if html and p["output"] != "photos":
+        est = estimate_output(info, dict(p, html=False))
+        if est and est > 1.5 * htmlpack.MAX_VIDEO_BYTES:
+            return _finish(res, "failed", "about %s of video is too much for one browser page (at most about %s): "
+                           "use a slideshow or photo-album preset, a smaller width, or leave the browser page off"
+                           % (human(est), human(htmlpack.MAX_VIDEO_BYTES)), started)
     paths.ensure_dirs()
     job_dir = tempfile.mkdtemp(prefix="job-", dir=paths.WORK_DIR)
-    work = os.path.join(job_dir, os.path.basename(final))
+    work = os.path.join(job_dir, os.path.basename(plain))
     status, message = "failed", ""
     gpu = p["encoder"] != "cpu" and not NO_GPU
     try:
@@ -1174,6 +1185,30 @@ def convert(src, p, out_dir=None, progress=None, cancel=None, allow_download=Fal
                 if progress:
                     progress(0.0, "the %s run failed; starting again" % what)
                 k += 1
+        if html:
+            # the checked video (or photos) goes into one .html page with its own 360 viewer, then the page is
+            # read back and compared. A video too big for a page is kept as the .mp4 instead.
+            if progress:
+                progress(1.0, "making the browser page")
+            page = os.path.join(job_dir, os.path.basename(final))
+            title = os.path.splitext(os.path.basename(src))[0]
+            try:
+                if p["output"] == "photos":
+                    packed = htmlpack.pack_photos(htmlpack.list_photos(work), page, title,
+                                                  source_name=os.path.basename(src))
+                else:
+                    packed = htmlpack.pack_video(work, page, title, source_name=os.path.basename(src))
+            except ValueError as e:
+                if p["output"] == "photos" or os.path.exists(plain):
+                    raise
+                notes.append("no browser page: %s; the .mp4 was kept instead" % e)
+                final = res["output"] = plain
+            else:
+                pcheck = htmlpack.verify(page, packed)
+                if not pcheck["ok"]:
+                    raise RuntimeError("browser page check failed: " + pcheck["problem"])
+                res["check"]["page"] = dict(pcheck, streaming=packed.get("streaming"))
+                work = page
         if os.path.exists(final):
             raise RuntimeError("a file with the output name appeared meanwhile; nothing was overwritten")
         os.makedirs(os.path.dirname(final), exist_ok=True)
@@ -1196,6 +1231,8 @@ def convert(src, p, out_dir=None, progress=None, cancel=None, allow_download=Fal
         if p["output"] == "chapters":
             res["chapters"] = info.get("_chapters", 0)
             res["sharp_frames"] = info.get("_sharp_frames", 0)
+        if final.lower().endswith(".html"):
+            what += " in one browser page"
         message = "%s, %s (%s of the original), %s" % (
             what, human(res["output_size"]), ratio_text(res["output_size"], res["source_size"]), made_on)
         if notes:
@@ -1335,6 +1372,9 @@ def _interp(table, x):
 
 def estimate_output(info, p):
     """Rough output size in bytes (upper bound when repeats are skipped). None if the video is unknown."""
+    if p.get("html"):                                # base64 text is 4/3 the size, plus the viewer and thumbnails
+        est = estimate_output(info, dict(p, html=False))
+        return int(est * 1.34 + 60000) if est else est
     if not info.get("width") or not info.get("duration"):
         return None
     width, height = out_size(p, info["width"], info["height"])

@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="generator" content="{{GENERATOR}}">
+<title>{{TITLE}}</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #eee; overflow: hidden;
+               font: 14px/1.4 "Segoe UI", system-ui, -apple-system, Arial, sans-serif; }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none;
+          outline: none; }
+  #view.drag { cursor: grabbing; }
+  .panel { position: fixed; background: rgba(17, 17, 17, .72); border-radius: 8px; user-select: none; }
+  #top { left: 12px; top: 12px; padding: 6px 12px; max-width: calc(100% - 140px); pointer-events: none; }
+  #title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sub { color: #bbb; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #corner { right: 12px; top: 12px; padding: 4px; display: flex; gap: 2px; }
+  #bar { left: 50%; bottom: 12px; transform: translateX(-50%); padding: 6px 8px; display: flex; align-items: center;
+         gap: 6px; max-width: calc(100% - 24px); box-sizing: border-box; }
+  #bar.video { width: min(900px, calc(100% - 24px)); }
+  button { background: transparent; color: #eee; border: 0; border-radius: 6px; min-width: 36px; height: 36px;
+           font: inherit; font-size: 18px; cursor: pointer; padding: 0 8px; }
+  button:hover { background: rgba(255, 255, 255, .16); }
+  button:focus-visible { outline: 2px solid #6cb4ff; }
+  button:disabled { opacity: .35; cursor: default; background: transparent; }
+  #count { min-width: 92px; text-align: center; font-variant-numeric: tabular-nums; }
+  #label { color: #bbb; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+  #seek { flex: 1; min-width: 80px; height: 36px; position: relative; cursor: pointer; touch-action: none; }
+  #track { position: absolute; left: 0; right: 0; top: 16px; height: 4px; background: rgba(255, 255, 255, .28);
+           border-radius: 2px; }
+  #fill { position: absolute; left: 0; top: 16px; height: 4px; background: #6cb4ff; border-radius: 2px; width: 0; }
+  #ticks { position: absolute; left: 0; right: 0; top: 13px; height: 10px; pointer-events: none; }
+  #ticks i { position: absolute; width: 1px; height: 10px; background: rgba(255, 255, 255, .55); }
+  #knob { position: absolute; top: 11px; width: 14px; height: 14px; margin-left: -7px; border-radius: 7px;
+          background: #fff; left: 0; }
+  #time { min-width: 96px; text-align: center; font-variant-numeric: tabular-nums; font-size: 12px; }
+  #strip { left: 12px; right: 12px; bottom: 68px; padding: 6px; display: none; overflow-x: auto; white-space: nowrap;
+           scrollbar-width: thin; scrollbar-color: #777 transparent; }
+  #strip.open { display: block; }
+  #strip img { height: 64px; width: 128px; margin-right: 4px; border-radius: 4px; cursor: pointer; opacity: .7;
+               border: 2px solid transparent; vertical-align: top; }
+  #strip img:hover { opacity: 1; }
+  #strip img.cur { opacity: 1; border-color: #6cb4ff; }
+  #msg { left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 14px 20px; max-width: min(560px, 86%);
+         text-align: center; display: none; }
+  #msg.show { display: block; }
+  #msg b { display: block; font-size: 16px; margin-bottom: 4px; }
+  #meter { height: 4px; background: rgba(255, 255, 255, .25); border-radius: 2px; margin-top: 10px; display: none; }
+  #meter i { display: block; height: 4px; width: 0; background: #6cb4ff; border-radius: 2px; }
+  #hint { left: 50%; top: 64px; transform: translateX(-50%); padding: 8px 14px; transition: opacity .6s;
+          pointer-events: none; text-align: center; max-width: 86%; }
+  #hint.off { opacity: 0; }
+  #big { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 84px; height: 84px;
+         border-radius: 42px; background: rgba(17, 17, 17, .72); font-size: 34px; display: none; }
+  #big.show { display: block; }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="view" tabindex="0" aria-label="360 view: drag to look around, scroll to zoom"></canvas>
+<div id="top" class="panel"><div id="title"></div><div id="sub"></div></div>
+<div id="corner" class="panel">
+  <button id="bzoomout" title="Zoom out (-)">&#8722;</button>
+  <button id="bzoomin" title="Zoom in (+)">+</button>
+  <button id="bfull" title="Full screen (F)">&#x26F6;</button>
+</div>
+<div id="hint" class="panel"></div>
+<div id="strip" class="panel"></div>
+<div id="bar" class="panel">
+  <button id="bprev" title="Previous (Left arrow)">&#9664;</button>
+  <button id="bplay" class="hide" title="Play / pause (Space)">&#9654;</button>
+  <div id="seek" class="hide"><div id="track"></div><div id="fill"></div><div id="ticks"></div><div id="knob"></div></div>
+  <div id="mid"><div id="count"></div><div id="label"></div></div>
+  <div id="time" class="hide"></div>
+  <button id="bnext" title="Next (Right arrow)">&#9654;</button>
+  <button id="bmute" class="hide" title="Sound on / off (M)">&#128263;</button>
+  <button id="bstrip" class="hide" title="Show all photos (T)">&#9638;</button>
+</div>
+<button id="big" title="Play">&#9654;</button>
+<div id="msg" class="panel"><b id="msgh"></b><span id="msgt"></span><div id="meter"><i></i></div></div>
+<script type="application/json" id="meta">{{META}}</script>
+<script>
+"use strict";
+(function () {
+  var META = JSON.parse(document.getElementById("meta").textContent);
+  var $ = function (id) { return document.getElementById(id); };
+  var canvas = $("view");
+  var isVideo = META.kind === "video";
+  var S = { ready: false, error: "", index: -1, yaw: 0, pitch: 0, fov: 75, kind: META.kind, count: 0, frames: 0,
+            loaded: 0 };
+  window.V360 = S;
+  var FOV_MIN = 12, FOV_MAX = 110, FOV_HOME = 75;
+
+  function message(head, text, progress) {
+    $("msgh").textContent = head || "";
+    $("msgt").textContent = text || "";
+    $("meter").style.display = progress == null ? "none" : "block";
+    if (progress != null) $("meter").firstChild.style.width = Math.round(progress * 100) + "%";
+    $("msg").className = "panel" + (head || text ? " show" : "");
+  }
+  function fail(head, text) { S.error = head + " " + (text || ""); message(head, text); }
+
+  // ---------------------------------------------------------------- the 360 view (WebGL, a textured sphere)
+  var gl = canvas.getContext("webgl2", { antialias: true }) || canvas.getContext("webgl", { antialias: true });
+  if (!gl) { fail("This browser can't show 360 pictures.", "Open the file in Microsoft Edge or Google Chrome."); return; }
+  var gl2 = typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext;
+  function shader(type, src) {
+    var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  var prog = gl.createProgram();
+  gl.attachShader(prog, shader(gl.VERTEX_SHADER,
+    "attribute vec3 p; attribute vec2 t; uniform mat4 m; varying vec2 v;" +
+    "void main() { v = t; gl_Position = m * vec4(p, 1.0); }"));
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER,
+    "precision mediump float; uniform sampler2D s; varying vec2 v; void main() { gl_FragColor = texture2D(s, v); }"));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  var LON = 96, LAT = 48, verts = [], idx = [];
+  for (var j = 0; j <= LAT; j++) {
+    for (var i = 0; i <= LON; i++) {
+      var u = i / LON, w = j / LAT, lon = (u - 0.5) * 2 * Math.PI, lat = (0.5 - w) * Math.PI;
+      verts.push(Math.cos(lat) * Math.sin(lon), Math.sin(lat), -Math.cos(lat) * Math.cos(lon), u, w);
+    }
+  }
+  for (j = 0; j < LAT; j++) {
+    for (i = 0; i < LON; i++) {
+      var a = j * (LON + 1) + i, b = a + LON + 1;
+      idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+  var ap = gl.getAttribLocation(prog, "p"), at = gl.getAttribLocation(prog, "t");
+  gl.enableVertexAttribArray(ap); gl.vertexAttribPointer(ap, 3, gl.FLOAT, false, 20, 0);
+  gl.enableVertexAttribArray(at); gl.vertexAttribPointer(at, 2, gl.FLOAT, false, 20, 12);
+  var um = gl.getUniformLocation(prog, "m");
+  var MAXTEX = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  var aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+  var tex = gl.createTexture(), hasTex = false;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+  function upload(src, w, h, mip) {
+    // a picture wider than the graphics card's limit is reduced first (rare: the limit is 16384 on most PCs)
+    if (w > MAXTEX || h > MAXTEX) {
+      var k = Math.min(MAXTEX / w, MAXTEX / h), c = document.createElement("canvas");
+      c.width = Math.floor(w * k); c.height = Math.floor(h * k);
+      c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+      src = c;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    if (mip && gl2) {
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
+    } else {
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    }
+    hasTex = true; S.frames++;
+    dirty = true;
+  }
+
+  var dirty = true;
+  function draw() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0.067, 0.067, 0.067, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    if (!hasTex) return;
+    var f = 1 / Math.tan(S.fov * Math.PI / 360), asp = w / h, n = 0.1, far = 10;
+    var cy = Math.cos(S.yaw * Math.PI / 180), sy = Math.sin(S.yaw * Math.PI / 180);
+    var cp = Math.cos(-S.pitch * Math.PI / 180), sp = Math.sin(-S.pitch * Math.PI / 180);
+    // view = Rx(-pitch) * Ry(yaw); m = perspective * view (column-major)
+    var v = [cy, sp * sy, -cp * sy, 0,   0, cp, sp, 0,   sy, -sp * cy, cp * cy, 0,   0, 0, 0, 1];
+    var p = [f / asp, 0, 0, 0,   0, f, 0, 0,   0, 0, (far + n) / (n - far), -1,   0, 0, 2 * far * n / (n - far), 0];
+    var m = new Float32Array(16);
+    for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++) {
+      var s = 0; for (var k = 0; k < 4; k++) s += p[k * 4 + r] * v[c * 4 + k];
+      m[c * 4 + r] = s;
+    }
+    gl.uniformMatrix4fv(um, false, m);
+    gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
+  }
+  function loop() {
+    if (isVideo && video && !video.paused && !hasRVFC) grab();
+    if (dirty) { dirty = false; draw(); }
+    requestAnimationFrame(loop);
+  }
+  window.addEventListener("resize", function () { dirty = true; });
+  // for tests: the colour in the middle of the view (works only because the picture is not blocked by the browser)
+  S.sample = function (x, y) {
+    draw();
+    var px = new Uint8Array(4);
+    gl.readPixels(Math.floor(canvas.width * (x == null ? 0.5 : x)), Math.floor(canvas.height * (y == null ? 0.5 : y)),
+                  1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    return [px[0], px[1], px[2]];
+  };
+
+  // ---------------------------------------------------------------- looking around
+  function clampView() {
+    S.fov = Math.max(FOV_MIN, Math.min(FOV_MAX, S.fov));
+    S.pitch = Math.max(-90, Math.min(90, S.pitch));
+    S.yaw = ((S.yaw + 180) % 360 + 360) % 360 - 180;
+    dirty = true;
+  }
+  function zoom(factor) { S.fov *= factor; clampView(); touched(); }
+  var pts = {}, pinch = 0;
+  canvas.addEventListener("pointerdown", function (e) {
+    canvas.setPointerCapture(e.pointerId); pts[e.pointerId] = [e.clientX, e.clientY];
+    canvas.classList.add("drag"); canvas.focus(); pinch = 0;
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    var p = pts[e.pointerId]; if (!p) return;
+    var ids = Object.keys(pts);
+    if (ids.length === 1) {
+      var k = S.fov / canvas.clientHeight;
+      S.yaw -= (e.clientX - p[0]) * k; S.pitch += (e.clientY - p[1]) * k;
+      clampView(); touched();
+    }
+    pts[e.pointerId] = [e.clientX, e.clientY];
+    if (ids.length === 2) {
+      var q = pts[ids[0]], r = pts[ids[1]], d = Math.hypot(q[0] - r[0], q[1] - r[1]);
+      if (pinch && d) zoom(pinch / d);
+      pinch = d;
+    }
+  });
+  function up(e) { delete pts[e.pointerId]; pinch = 0; if (!Object.keys(pts).length) canvas.classList.remove("drag"); }
+  canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  canvas.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    zoom(Math.exp((e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY) * 0.0012));
+  }, { passive: false });
+  canvas.addEventListener("dblclick", function () { S.fov = FOV_HOME; clampView(); });
+  $("bzoomin").onclick = function () { zoom(0.8); };
+  $("bzoomout").onclick = function () { zoom(1.25); };
+  function fullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+  }
+  $("bfull").onclick = fullscreen;
+  var hintOff = false;
+  function touched() { if (!hintOff) { hintOff = true; $("hint").classList.add("off"); } }
+
+  // ---------------------------------------------------------------- the data packed into this file
+  function bytes(el) {
+    var s = el.textContent;
+    if (Uint8Array.fromBase64) return Uint8Array.fromBase64(s);
+    var bin = atob(s), n = bin.length, a = new Uint8Array(n);
+    for (var i = 0; i < n; i++) a[i] = bin.charCodeAt(i);
+    return a;
+  }
+  function clock(t, tenths) {
+    t = Math.max(0, t || 0);
+    var s = Math.floor(t), out = Math.floor(s / 60) + ":" + ("0" + s % 60).slice(-2);
+    if (s >= 3600) out = Math.floor(s / 3600) + ":" + ("0" + Math.floor(s % 3600 / 60)).slice(-2) + ":" + ("0" + s % 60).slice(-2);
+    return tenths ? out + "." + Math.floor((t - s) * 10) : out;
+  }
+  $("title").textContent = META.title || "";
+  $("sub").textContent = META.subtitle || "";
+
+  // ---------------------------------------------------------------- photo album
+  var items = META.items || [], cache = {}, wanted = -1;
+  function photo(i) {
+    if (cache[i]) return cache[i];
+    var el = $("d" + i);
+    if (!el) return Promise.reject(new Error("photo " + (i + 1) + " is not in the file"));
+    var url = URL.createObjectURL(new Blob([bytes(el)], { type: "image/jpeg" }));
+    var pr = new Promise(function (ok, no) {
+      var im = new Image();
+      im.onload = function () { URL.revokeObjectURL(url); ok(im); };
+      im.onerror = function () { URL.revokeObjectURL(url); no(new Error("photo " + (i + 1) + " can't be read")); };
+      im.src = url;
+    });
+    cache[i] = pr;
+    Object.keys(cache).forEach(function (k) { if (Math.abs(k - i) > 2) delete cache[k]; });
+    return pr;
+  }
+  function showPhoto(i) {
+    i = Math.max(0, Math.min(items.length - 1, i));
+    wanted = i;
+    $("count").textContent = (i + 1) + " / " + items.length;
+    $("label").textContent = items[i].label || "";
+    $("bprev").disabled = i === 0; $("bnext").disabled = i === items.length - 1;
+    var cur = $("strip").querySelector(".cur"); if (cur) cur.classList.remove("cur");
+    var th = $("strip").children[i];
+    if (th) { th.classList.add("cur"); if ($("strip").classList.contains("open")) th.scrollIntoView({ block: "nearest", inline: "center" }); }
+    return photo(i).then(function (im) {
+      if (wanted !== i) return;
+      upload(im, im.naturalWidth, im.naturalHeight, true);
+      S.index = i; S.ready = true; message();
+      if (i + 1 < items.length) photo(i + 1).catch(function () {});
+      if (i > 0) photo(i - 1).catch(function () {});
+    }).catch(function (e) { fail("This photo can't be shown.", e.message); });
+  }
+  function startAlbum() {
+    S.count = items.length;
+    $("hint").textContent = "Drag to look around · scroll to zoom · ← → keys for the previous and next photo";
+    var strip = $("strip");
+    items.forEach(function (it, i) {
+      var im = document.createElement("img");
+      im.alt = "Photo " + (i + 1); im.title = (i + 1) + (it.label ? " · " + it.label : ""); im.loading = "lazy";
+      if (it.thumb) im.src = it.thumb;
+      im.onclick = function () { showPhoto(i); };
+      strip.appendChild(im);
+    });
+    if (items.length > 1) $("bstrip").classList.remove("hide");
+    $("bstrip").onclick = toggleStrip;
+    $("bprev").onclick = function () { step(-1); }; $("bnext").onclick = function () { step(1); };
+    showPhoto(0);
+  }
+  function toggleStrip() {
+    var s = $("strip"); s.classList.toggle("open");
+    var cur = s.querySelector(".cur"); if (cur) cur.scrollIntoView({ block: "nearest", inline: "center" });
+  }
+
+  // ---------------------------------------------------------------- video
+  var video = null, hasRVFC = false, chapters = [], V = META.video || {};
+  function grab() {
+    if (video && video.readyState >= 2 && video.videoWidth) {
+      try { upload(video, video.videoWidth, video.videoHeight, false); }
+      catch (e) { fail("This browser blocked the video picture.", e.message); }
+    }
+  }
+  function chapterAt(t) {
+    var k = -1;
+    for (var i = 0; i < chapters.length; i++) if (chapters[i].t <= t + 0.02) k = i;
+    return k;
+  }
+  function videoUi() {
+    if (!video) return;
+    var d = video.duration || V.duration || 0, t = video.currentTime || 0, f = d ? Math.min(1, t / d) : 0;
+    $("fill").style.width = (f * 100) + "%"; $("knob").style.left = (f * 100) + "%";
+    $("time").textContent = clock(t) + " / " + clock(d);
+    $("bplay").innerHTML = video.paused ? "&#9654;" : "&#10074;&#10074;";
+    var k = chapterAt(t);
+    S.index = k;
+    if (chapters.length) {
+      $("count").textContent = (k + 1) + " / " + chapters.length;
+      $("label").textContent = k >= 0 ? (chapters[k].title || "") : "";
+    }
+  }
+  function seekTo(t) {
+    var d = video.duration || V.duration || 0;
+    video.currentTime = Math.max(0, Math.min(d ? d - 0.001 : t, t));
+    videoUi();
+  }
+  function togglePlay() {
+    if (!video) return;
+    $("big").classList.remove("show");
+    if (video.paused) {
+      if (video.duration && video.currentTime >= video.duration - 0.05) video.currentTime = 0;
+      var p = video.play(); if (p && p.catch) p.catch(function () {});
+    } else video.pause();
+  }
+  function startVideo() {
+    chapters = V.chapters || []; S.count = chapters.length;
+    var bar = $("bar"); bar.classList.add("video");
+    ["bplay", "seek", "time"].forEach(function (id) { $(id).classList.remove("hide"); });
+    if (!chapters.length) { $("bprev").classList.add("hide"); $("bnext").classList.add("hide"); $("mid").classList.add("hide"); }
+    $("bprev").innerHTML = "&#10072;&#9664;"; $("bnext").innerHTML = "&#9654;&#10072;";   // unlike the play button
+    $("bprev").title = (V.stills ? "Previous panorama" : "Previous sharp frame") + " (Left arrow)";
+    $("bnext").title = (V.stills ? "Next panorama" : "Next sharp frame") + " (Right arrow)";
+    $("hint").textContent = "Drag to look around · scroll to zoom · Space plays and pauses" +
+      (chapters.length ? " · ← → keys step through the " + (V.stills ? "panoramas" : "sharp frames") : "");
+    var d = V.duration || 0, ticks = $("ticks");
+    if (d && chapters.length <= 400) chapters.forEach(function (c) {
+      var i = document.createElement("i"); i.style.left = (100 * c.t / d) + "%"; ticks.appendChild(i);
+    });
+    var els = document.querySelectorAll("script.d");
+    var cantPlay = (V.codec || "The video") + (V.width ? " at " + V.width + " × " + V.height : "") +
+      " needs a newer PC or browser. Try Microsoft Edge or Google Chrome, or ask the sender for the " +
+      "high-compatibility (H.264) version or the photo album.";
+    function makeVideo() {
+      video = document.createElement("video");
+      video.playsInline = true; video.preload = "auto"; video.muted = !V.audio; video.loop = false;
+      S.video = video;
+      video.addEventListener("error", function () { fail("This browser can't play this video.", cantPlay); });
+      video.addEventListener("loadeddata", function () {
+        grab(); S.ready = true; message(); videoUi();
+        if (!V.stills) $("big").classList.add("show");
+      });
+      ["timeupdate", "play", "pause", "ended", "seeking", "durationchange"].forEach(function (ev) {
+        video.addEventListener(ev, videoUi);
+      });
+      video.addEventListener("seeked", function () { grab(); videoUi(); });
+      video.addEventListener("play", function () { $("big").classList.remove("show"); });
+      hasRVFC = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+      if (hasRVFC) {
+        var onFrame = function () { grab(); video.requestVideoFrameCallback(onFrame); };
+        video.requestVideoFrameCallback(onFrame);
+      }
+      if (V.audio) { $("bmute").classList.remove("hide"); $("bmute").innerHTML = "&#128266;"; }
+    }
+    message("Opening the video…", "");
+    if (V.mse) stream(); else whole();
+
+    // Streaming: the video is in the page as independent pieces (els[0] = the header, els[i + 1] = piece i, which
+    // starts at V.pieces[i][0] seconds). Only the pieces around the playhead are handed to the browser, and the
+    // ones left behind are dropped again, so the length of the video doesn't matter.
+    function stream() {
+      var MS = window.MediaSource || window.ManagedMediaSource;
+      if (!MS || !MS.isTypeSupported(V.mse)) { fail("This browser can't play this video.", cantPlay); return; }
+      if (els.length !== V.pieces.length + 1) {
+        fail("This video can't be opened.", "The file is incomplete (" + els.length + " of " + (V.pieces.length + 1) +
+             " pieces): copy or download it again."); return;
+      }
+      var P = V.pieces, D = V.duration, have = [], sb = null, ms = new MS(), ahead = 12, stuck = 0;
+      function pieceAt(t) { var k = 0; for (var i = 0; i < P.length; i++) if (P[i][0] <= t + 0.001) k = i; return k; }
+      function pump() {
+        if (!sb || sb.updating || ms.readyState === "closed" || S.error) return;
+        var t = video.currentTime, cur = pieceAt(t), i, n;
+        // which pieces are wanted now: the one at the playhead and always the next one (or playback would stop at
+        // the join), then on to `ahead` seconds (or 48 MB) in front
+        var last = cur, size = P[cur][1];
+        while (last + 1 < P.length && (last === cur || (P[last + 1][0] < t + ahead && size + P[last + 1][1] < 48e6))) {
+          last++; size += P[last][1];
+        }
+        try {
+          // drop what was left behind (more than 4 s back) and anything far in front (after a jump backwards)
+          var keepFrom = Math.max(0, pieceAt(Math.max(0, t - 4)));
+          for (i = 0; i < keepFrom; i++) if (have[i]) {
+            for (n = i; n < keepFrom; n++) have[n] = false;
+            sb.remove(0, P[keepFrom][0]); return;
+          }
+          for (i = last + 4; i < P.length; i++) if (have[i]) {
+            for (n = i; n < P.length; n++) have[n] = false;
+            sb.remove(P[i][0], D + 10); return;
+          }
+          for (i = cur; i <= last; i++) if (!have[i]) {
+            have[i] = true;
+            sb.appendBuffer(bytes(els[i + 1]));
+            S.loaded += P[i][1]; stuck = 0;
+            return;
+          }
+          if (have[P.length - 1] && ms.readyState === "open" && !sb.updating) ms.endOfStream();
+        } catch (e) {
+          if (e.name === "QuotaExceededError" && stuck < 6) {      // the browser's video store is full: keep less
+            have[i] = false; stuck++; ahead = Math.max(3, ahead / 2);
+            setTimeout(pump, 250);
+          } else fail("This video can't be opened.", e.message);
+        }
+      }
+      makeVideo();
+      ms.addEventListener("sourceopen", function () {
+        if (sb) return;
+        try {
+          sb = ms.addSourceBuffer(V.mse);
+          if (V.t0) sb.timestampOffset = -V.t0;          // the first picture goes to time 0
+          sb.addEventListener("updateend", function () {
+            if (ms.readyState === "open" && !sb.updating && !(isFinite(ms.duration) && ms.duration >= D)) {
+              try { ms.duration = D; } catch (e) {}
+            }
+            pump();
+          });
+          sb.addEventListener("error", function () { fail("This browser can't play this video.", cantPlay); });
+          sb.appendBuffer(bytes(els[0]));
+        } catch (e) { fail("This browser can't play this video.", cantPlay); }
+      });
+      ["timeupdate", "seeking", "waiting", "play"].forEach(function (ev) { video.addEventListener(ev, pump); });
+      if (window.ManagedMediaSource && MS === window.ManagedMediaSource) video.disableRemotePlayback = true;
+      video.src = URL.createObjectURL(ms);
+    }
+
+    // Whole file (formats that can't be cut into pieces): rebuilt in the browser's memory, so only for small videos
+    function whole() {
+      var parts = [], n = 0, total = V.bytes || 0;
+      function next(k) {
+        if (k < els.length) {
+          var a = bytes(els[k]); els[k].textContent = ""; parts.push(a); n += a.length; S.loaded = n;
+          message("Opening the video…", "", total ? n / total : null);
+          return new Promise(function (r) { setTimeout(r, 0); }).then(function () { return next(k + 1); });
+        }
+        if (total && n !== total) throw new Error("the file is incomplete (" + n + " of " + total + " bytes): copy or download it again");
+        return new Blob(parts, { type: V.mime || "video/mp4" });
+      }
+      next(0).then(function (blob) {
+        parts = null;
+        makeVideo();
+        video.src = URL.createObjectURL(blob);
+      }).catch(function (e) { fail("This video can't be opened.", e.message); });
+    }
+    $("bplay").onclick = togglePlay; $("big").onclick = togglePlay;
+    $("bprev").onclick = function () { step(-1); }; $("bnext").onclick = function () { step(1); };
+    $("bmute").onclick = mute;
+    var seek = $("seek"), seeking = false;
+    function at(e) {
+      var r = seek.getBoundingClientRect(), d = (video && video.duration) || V.duration || 0;
+      seekTo(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * d);
+    }
+    seek.addEventListener("pointerdown", function (e) { if (!video) return; seeking = true; seek.setPointerCapture(e.pointerId); at(e); });
+    seek.addEventListener("pointermove", function (e) { if (seeking) at(e); });
+    seek.addEventListener("pointerup", function () { seeking = false; });
+    seek.addEventListener("pointercancel", function () { seeking = false; });
+  }
+  function mute() {
+    if (!video || !V.audio) return;
+    video.muted = !video.muted; $("bmute").innerHTML = video.muted ? "&#128263;" : "&#128266;";
+  }
+
+  // ---------------------------------------------------------------- stepping (buttons and keys)
+  function step(dir) {
+    touched();
+    if (!isVideo) { if (wanted + dir >= 0 && wanted + dir < items.length) showPhoto(wanted + dir); return; }
+    if (!video) return;
+    if (!chapters.length) { seekTo(video.currentTime + dir * 5); return; }
+    video.pause();
+    var t = video.currentTime, k = chapterAt(t), to;
+    if (dir > 0) to = Math.min(chapters.length - 1, k + 1);
+    else to = (k >= 0 && t - chapters[k].t > 0.3) ? k : Math.max(0, k - 1);   // back to the start of this one first
+    seekTo(chapters[to].t + 0.001);
+  }
+  S.step = step; S.show = function (i) { return isVideo ? seekTo(chapters[i].t + 0.001) : showPhoto(i); };
+  window.addEventListener("keydown", function (e) {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    var k = e.key, used = true;
+    if (k === "ArrowRight" || k === "PageDown") step(1);
+    else if (k === "ArrowLeft" || k === "PageUp") step(-1);
+    else if (k === "Home") { if (isVideo) { if (video) seekTo(0); } else showPhoto(0); }
+    else if (k === "End") { if (isVideo) { if (video && chapters.length) seekTo(chapters[chapters.length - 1].t + 0.001); } else showPhoto(items.length - 1); }
+    else if (k === " " || k === "k" || k === "K") { if (isVideo) togglePlay(); else step(1); }
+    else if (k === "+" || k === "=" || k === "ArrowUp") zoom(0.8);
+    else if (k === "-" || k === "_" || k === "ArrowDown") zoom(1.25);
+    else if (k === "f" || k === "F") fullscreen();
+    else if (k === "m" || k === "M") mute();
+    else if ((k === "t" || k === "T") && !isVideo) toggleStrip();
+    else used = false;
+    if (used) e.preventDefault();
+  });
+
+  requestAnimationFrame(loop);
+  function start() {
+    try { if (isVideo) startVideo(); else startAlbum(); }
+    catch (e) { fail("This file can't be opened.", e.message); }
+  }
+  if (document.readyState === "loading") {
+    message("Opening…", "");
+    document.addEventListener("DOMContentLoaded", start);
+  } else start();
+})();
+</script>
+<!--DATA-->
+</body>
+</html>

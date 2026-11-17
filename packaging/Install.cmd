@@ -1,5 +1,5 @@
 @echo off
-rem 360 Video Shrinker - per-user install (no admin rights). See "READ ME FIRST.txt".
+rem 360 Shrink and Share - per-user install (no admin rights). See "READ ME FIRST.txt".
 setlocal
 if not exist "%~dp0payload\python\python.exe" (
   echo The package is incomplete: unzip the whole zip file first, then run Install.cmd from the unzipped folder.

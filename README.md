@@ -1,4 +1,6 @@
-# 360 Video Shrinker
+# 360 Shrink and Share
+
+(Called **360 Video Shrinker** until version 1.2.)
 
 Turns big 360-degree videos (walk-throughs) into small files that keep most of what
 they're good for: you can still look all around every spot. It keeps **one sharp panorama every few
@@ -13,6 +15,11 @@ seconds** and writes either
   Shift+N / Shift+P to jump from sharp frame to sharp frame. About 1/3 of an 8K export at qp 22
   (as sharp as the original), about 1/6 at qp 26 (the default).
 
+New in 1.3: any of these can be made as **one browser page** (`.html`) instead. It opens in Edge or Chrome
+by double-click, with its own 360 viewer inside: nothing to install, no VLC, no internet. Photos become an
+album you step through with the arrow keys; a video or slideshow plays in the page. See
+[Browser pages](#browser-pages).
+
 Works with equirectangular 360 videos up to 8K (7680 x 3840), 8- and 10-bit, H.264 or HEVC, mono or
 stereo. Typical result: **1/20 to 1/600 of the original's size** (1/60 to 1/170 with the full-quality
 slideshow preset). The GPU does the heavy work where there is one, so a 4-minute 5.7K survey takes about 15
@@ -22,12 +29,12 @@ Windows 10 / 11, 64-bit.
 
 ## Install
 
-**Easiest:** download `360 Video Shrinker <version>.zip` from the
+**Easiest:** download `360 Shrink and Share <version>.zip` from the
 [Releases](../../releases) page. It includes its own Python and video libraries; no admin rights.
 
 1. Right-click the zip > Properties > tick **Unblock** (if shown) > OK.
 2. Right-click > **Extract All...**, open the folder, double-click **Install.cmd**.
-3. It installs to `%LOCALAPPDATA%\Programs\360 Video Shrinker` and adds Start-menu and Desktop shortcuts,
+3. It installs to `%LOCALAPPDATA%\Programs\360 Shrink and Share` and adds Start-menu and Desktop shortcuts,
    a File Explorer right-click menu and an entry in Settings > Apps (which uninstalls it).
 
 **From source:** Python 3.14 (64-bit, with tkinter) and `av` (PyAV), `numpy` and `Pillow`:
@@ -43,7 +50,7 @@ python selftest.py               checks everything on synthetic clips (a few min
 
 - **Window:** add videos or a folder, pick a preset, press **Start**. The Status column says where each
   one was made ("Done - Intel GPU").
-- **File Explorer:** right-click 360 videos (.mp4 .mov .m4v) > **360 Video Shrinker** > a preset
+- **File Explorer:** right-click 360 videos (.mp4 .mov .m4v) > **360 Shrink and Share** > a preset
   (Windows 11: under **Show more options**). On a folder: **Find 360 videos in this folder...**.
   Turn the menu on or off in **Tools > Right-click menu in File Explorer** (per user, HKCU).
 
@@ -56,6 +63,39 @@ python selftest.py               checks everything on synthetic clips (a few min
 - 12 fps videos: play normally, or pause and use **Shift+N / Shift+P**: each chapter is the sharpest
   frame of its 2 s. Every frame has the same quality.
 
+## Browser pages
+
+For sending 360 material to people who can't install anything: the result is a single `.html` file with
+the pictures and the viewer inside it.
+
+- **In the window:** tick **Browser page (.html)** before Start; it applies to whichever preset you picked.
+  Or tick **Browser page** in a preset (**Edit presets...**) so the right-click menu makes pages too.
+- **From what you already have:** **File > Browser page from a 360 video or slideshow (.mp4)...** and
+  **File > Browser album from a folder of 360 photos...** (for example photos taken with a camera's
+  interval timer; photos wider than 8192 px are reduced to that). Command line: `shrink360.py html`.
+- **In the page:** drag to look around, mouse wheel (or + / -) to zoom, double-click to reset the zoom,
+  F for full screen.
+  - Album: Left / Right arrow for the previous / next photo, Home / End, T for the thumbnails. The
+    direction you are looking in is kept from photo to photo.
+  - Video: Space plays and pauses, Left / Right arrow steps through the panoramas (slideshow) or the
+    sharp frames (12 fps video), click or drag the bar to jump, M for the sound.
+
+What to expect:
+
+| | |
+|---|---|
+| Size | the page is 1/3 bigger than the .mp4 or the photos it holds |
+| Largest video | 1.5 GB of video in one page (tested in Edge and Chrome 157: opens in about 12 s, jumps in under 1 s). A bigger one is kept as the .mp4, and the result says so |
+| Photo album | no fixed limit; 100 photos at 5760 px are about 200 MB |
+| Browsers | Edge and Chrome (tested); a 360 view needs WebGL, which every current browser has |
+| HEVC video | needs a PC whose graphics chip decodes HEVC (most since about 2017). Where it doesn't, the page says so: use the H.264 preset, or the photo album, which works everywhere |
+| Slideshows made by 1.0 | were written as HEVC "Main Intra", which browsers can't play: convert the original again |
+
+Why one file: a page opened from disk is not allowed to put a video or photo from a *separate* file into
+a 360 view (the browser treats each local file as a different site), so everything is inside the page.
+Videos are stored in pieces and only the few seconds around the playhead are handed to the browser, so a
+long video doesn't have to fit in memory at once.
+
 ## Presets
 
 | Preset | What it makes |
@@ -65,6 +105,7 @@ python selftest.py               checks everything on synthetic clips (a few min
 | Slideshow movie low quality | 1 / 5 s at 2880 px, HEVC crf 32, skips repeats |
 | Slideshow high compatibility | 1 / 5 s at the video's own resolution, H.264 crf 24, for PCs without HEVC |
 | Converter to 360 photos | folder of JPEG panoramas at the video's own resolution, quality 88, 1 / 5 s |
+| 360 photo album for a browser | one `.html` page: a 360 photo every 5 s (up to 5760 px, quality 85), arrow keys, thumbnails |
 
 Every preset picks the sharpest frame of its interval.
 
@@ -100,10 +141,12 @@ GPU off. **Tools > Check the GPU...** (or `shrink360.py gpu`) shows what the GPU
 ## Safety
 
 - Outputs go next to the original, named `<video> (360 slideshow 5s 5760px HEVC, 1.5s each).mp4` or
-  `<video> (360 frames 5s 3840px)\0012s 360.jpg` or `<video> (360 chapters 2s 7680px 12fps).mp4`.
+  `<video> (360 frames 5s 3840px)\0012s 360.jpg` or `<video> (360 chapters 2s 7680px 12fps).mp4`;
+  browser pages have the same names ending in `.html` (an album: `<video> (360 album 5s 5760px).html`).
   Nothing is ever overwritten.
 - Every output is checked before it is moved into place: every frame decodes, count and length match,
-  the 360 tags, keyframes and chapters are there.
+  the 360 tags, keyframes and chapters are there. A browser page is then read back and compared with what
+  was packed into it.
 - **Originals are never changed or deleted**, except on request (right-click finished rows > **Send the
   original(s) to the Recycle Bin...**, or `shrink360.py recycle --yes`), and only when the log holds a
   checked conversion of exactly that file.
@@ -119,7 +162,9 @@ python shrink360.py <command>
   presets                                   list presets
   probe FILE... [--preset NAME]             what a file is; estimated output size
   scan FOLDER... [--preset NAME] [--report out.csv] [--min-mb 20]
-  convert FILE... --preset NAME [--out DIR] [--set key=value ...] [--allow-download]
+  convert FILE... --preset NAME [--html] [--out DIR] [--set key=value ...] [--allow-download]
+  html PATH... [--out DIR] [--width N|original] [--quality Q]
+                                            a .mp4 or a folder of 360 photos on disk -> one browser page
   gpu                                       what the GPUs here can encode and decode
   log [--last N]                            what was done
   recycle FILE... [--yes]                   dry run, or send checked originals to the Recycle Bin
@@ -130,7 +175,7 @@ python shrink360.py <command>
 
 ## Data folder
 
-Presets, settings, the conversion log and the work folder are in `%LOCALAPPDATA%\360 Video Shrinker`.
+Presets, settings, the conversion log and the work folder are in `%LOCALAPPDATA%\360 Shrink and Share`.
 `V360_DATA_DIR` overrides it, and so does `data_dir` in an `install.json` beside `paths.py` (the
 installer writes one; a source checkout can have its own, which is not committed).
 
@@ -140,7 +185,7 @@ installer writes one; a source checkout can have its own, which is not committed
 powershell -ExecutionPolicy Bypass -File package.ps1
 ```
 
-makes `dist\360 Video Shrinker <version>.zip` from a local Python 3.14 (python.org) with numpy, Pillow and
+makes `dist\360 Shrink and Share <version>.zip` from a local Python 3.14 (python.org) with numpy, Pillow and
 PyAV. It contains no presets, settings, logs or other personal files; the build stops if one turns up.
 
 ## Files
@@ -151,10 +196,13 @@ PyAV. It contains no presets, settings, logs or other personal files; the build 
 | `gui.py` | the window and the preset editor (tkinter) |
 | `engine.py` | probe, frame picking, GPU / CPU encoding with fallback, chapters, JPEGs, checks, log, Recycle Bin, scan |
 | `mp4meta.py` | reads and writes the 360 tags (Google Spherical V1 + V2) |
+| `htmlpack.py` | browser pages: packs a video (as streaming pieces) or photos into one `.html`, reads a page back |
+| `viewer.html` | the page itself: the 360 viewer (WebGL), album and video controls; no outside libraries |
 | `presets.py` | preset fields, built-in presets, load / save / validate |
 | `contextmenu.py` | the File Explorer right-click menu (HKCU) |
 | `shrink360.py` | command line |
-| `selftest.py` | builds synthetic clips (8K, 10-bit, untagged, fisheye, 16:9, stereo) and checks everything |
+| `selftest.py` | builds synthetic clips (8K, 10-bit, untagged, fisheye, 16:9, stereo) and checks everything, including the pages in headless Edge and Chrome |
+| `tools\browsertest.py`, `tools\cdp.py` | open pages from disk in headless Edge / Chrome and check picture, mouse, keys, playback |
 | `make_icon.py` | draws `icon.ico` |
 | `packaging\` | the per-user installer (`setup.py`, `Install.cmd`) and its read-me files |
 

@@ -1,6 +1,6 @@
-# 360 Video Shrinker - builds the shareable install package (the GitHub release zip).
+# 360 Shrink and Share - builds the shareable install package (the GitHub release zip).
 #   powershell -ExecutionPolicy Bypass -File package.ps1
-# Output: dist\360 Video Shrinker <version>.zip (and the unzipped dist\build\ folder it was made from).
+# Output: dist\360 Shrink and Share <version>.zip (and the unzipped dist\build\ folder it was made from).
 # Bundles a copy of this PC's Python 3.14 (python.org, signed python.exe) with tkinter, numpy and Pillow
 # from the user's site-packages and PyAV from the pylib folder. Nothing is downloaded. No personal data:
 # no log, presets, settings, install.json, samples, work files or photos (built-in presets only).
@@ -10,11 +10,11 @@ $Version = (Select-String -Path "$App\paths.py" -Pattern '^VERSION = "(.+)"').Ma
 $PyHome  = 'C:\Program Files\Python314'
 $UserSite = "$env:APPDATA\Python\Python314\site-packages"
 # PyAV: the "pylib" folder named in this checkout's install.json (not committed), else the default data folder's
-$PyLib   = "$env:LOCALAPPDATA\360 Video Shrinker\pylib"
+$PyLib   = "$env:LOCALAPPDATA\360 Shrink and Share\pylib"
 if (Test-Path "$App\install.json") {
     $cfg = Get-Content "$App\install.json" -Raw | ConvertFrom-Json
     if ($cfg.pylib) { $PyLib = [Environment]::ExpandEnvironmentVariables($cfg.pylib) } }
-$Name    = "360 Video Shrinker $Version"
+$Name    = "360 Shrink and Share $Version"
 $Dist    = "$App\dist"
 $Stage   = "$Dist\build\$Name"
 $Zip     = "$Dist\$Name.zip"
@@ -40,8 +40,10 @@ foreach ($d in 'av', 'av.libs', 'av-19.0.2.dist-info') { Robo "$PyLib\$d" "$site
 # (pylib\bin\pyav.exe is left out: the app does not use it)
 
 # --- the program ------------------------------------------------------------------------------------------
-foreach ($f in 'app.pyw', 'contextmenu.py', 'engine.py', 'gui.py', 'icon.ico', 'mp4meta.py', 'paths.py',
-               'presets.py', 'selftest.py', 'shrink360.py') { Copy-Item "$App\$f" "$Stage\payload\app\" }
+foreach ($f in 'app.pyw', 'contextmenu.py', 'engine.py', 'gui.py', 'htmlpack.py', 'icon.ico', 'mp4meta.py', 'paths.py',
+               'presets.py', 'selftest.py', 'shrink360.py', 'viewer.html') { Copy-Item "$App\$f" "$Stage\payload\app\" }
+New-Item -ItemType Directory -Force "$Stage\payload\app\tools" | Out-Null      # the self-test's browser checks
+foreach ($f in 'browsertest.py', 'cdp.py') { Copy-Item "$App\tools\$f" "$Stage\payload\app\tools\" }
 Copy-Item "$App\packaging\README-install.txt" "$Stage\payload\app\README.txt"
 Copy-Item "$App\packaging\setup.py" "$Stage\payload\"
 Copy-Item "$App\packaging\Install.cmd", "$App\packaging\READ ME FIRST.txt" "$Stage\"
